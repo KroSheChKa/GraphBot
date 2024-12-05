@@ -31,8 +31,25 @@ def to_game_cords(x_y):
     new_y = 15 - x_y[1] / field['height'] * 30
     return (new_x, new_y)
 
+def get_enemies(match, threshold, w, h):
+    enemy_yloc, enemy_xloc = numpy.where(match > threshold)
+
+    rectangles = []
+    for (x, y) in zip(enemy_xloc, enemy_yloc):
+        rectangles.append([x, y, w, h])
+        rectangles.append([x, y, w, h])
+    
+    rectangles, _ = cv2.groupRectangles(rectangles, 1, 0.3)
+    print(rectangles)
+
+    enemies = []
+    for i in range(len(rectangles)):
+        x_y = to_game_cords((float(rectangles[i][0]) + w/2, float(rectangles[i][1]) + h/2))
+        enemies.append(x_y)
+    return enemies
+
+
 def main():
-    # Reading the image
     active = cv2.imread(r'Assets\active.png', 0)
     active_w = active.shape[1]
     active_h = active.shape[0]
@@ -56,28 +73,13 @@ def main():
         print(active_max_val, active_max_loc, to_game_cords(active_max_loc))
 
         enemy_match = cv2.matchTemplate(screenshot_r, enemy, cv2.TM_CCOEFF_NORMED)
-        enemy_yloc, enemy_xloc = numpy.where(enemy_match > enemy_threshold)
-
-        rectangles = []
-        for (x, y) in zip(enemy_xloc, enemy_yloc):
-            rectangles.append([x, y, enemy_w, enemy_h])
-            rectangles.append([x, y, enemy_w, enemy_h])
-        
-        rectangles, _ = cv2.groupRectangles(rectangles, 1, 0.3)
-        print(rectangles)
-
-        enemies = []
-        for i in range(len(rectangles)):
-            x_y = to_game_cords((float(rectangles[i][0]) + enemy_w/2, float(rectangles[i][1]) + enemy_h/2))
-            enemies.append(x_y)
-            # min_x = min(min_x, x_y[0])
-        
+        enemies = get_enemies(enemy_match, enemy_threshold, enemy_w, enemy_h)
         print(enemies)
 
         # if max_val > threshold:
         #     print('YES')
 
-        cv2.imshow('TimberBot', screenshot_r)
+        cv2.imshow('GraphBot', screenshot_r)
         cv2.waitKey(1)
 
 if __name__ == '__main__':
@@ -90,6 +92,5 @@ if __name__ == '__main__':
     while not(is_key_pressed(start_key)):
         pass
 
-    # Run the code
     main()
     
