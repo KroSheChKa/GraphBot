@@ -3,6 +3,7 @@ import mss
 import sys, ctypes
 import time
 import numpy
+import random
 
 start_key = 0x70 # f1
 exit_key = 0x71 # f2
@@ -26,7 +27,6 @@ def sleep_key(sec):
             break
 
 def to_game_cords(x_y):
-    print()
     new_x = -25 + x_y[0] / field['width'] * 50
     new_y = 15 - x_y[1] / field['height'] * 30
     return (new_x, new_y)
@@ -40,13 +40,55 @@ def get_enemies(match, threshold, w, h):
         rectangles.append([x, y, w, h])
     
     rectangles, _ = cv2.groupRectangles(rectangles, 1, 0.3)
-    print(rectangles)
+    # print(rectangles)
 
     enemies = []
     for i in range(len(rectangles)):
         x_y = to_game_cords((float(rectangles[i][0]) + w/2, float(rectangles[i][1]) + h/2))
         enemies.append(x_y)
     return enemies
+
+def detect_black_circles(s_r):
+    s_r = cv2.GaussianBlur(s_r, (3, 3), 0)
+
+    lower_bound = 0
+    upper_bound = 30
+
+    # Создаем маску: пиксели в диапазоне [240, 255] будут оставлены, остальные заменим на белый
+    mask = cv2.inRange(s_r, lower_bound, upper_bound)
+
+    result = numpy.ones_like(s_r) * 255  # Изначально делаем все белыми
+    result[mask == 255] = 0  # Пиксели, попадающие в маску, делаем черными
+    result = cv2.GaussianBlur(result, (15, 15), 0)
+
+    # Apply Hough transform on the blurred image. 
+    detected_circles = cv2.HoughCircles(result,  
+                    cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 50, 
+                param2 = 32, minRadius = 3, maxRadius = 200) 
+    
+    # Draw circles that are detected. 
+    if detected_circles is not None: 
+    
+        # Convert the circle parameters a, b and r to integers. 
+        detected_circles = numpy.uint16(numpy.around(detected_circles)) 
+    
+        for pt in detected_circles[0, :]: 
+            a, b, r = pt[0], pt[1], pt[2] 
+    
+            # Draw the circumference of the circle. 
+            cv2.circle(result, (a, b), r, (100, 0, 0), 2) 
+    
+            # Draw a small circle (of radius 1) to show the center. 
+            cv2.circle(result, (a, b), 1, (255, 0, 0), 3) 
+        
+        cv2.imshow('GraphBot', result)
+        cv2.waitKey(1)
+
+        return detected_circles[0, :], s_r
+    else:
+        print('Oops!')
+        return None, None
+    
 
 
 def main():
@@ -63,6 +105,7 @@ def main():
     active_threshold = 0.72
     enemy_threshold = 0.64
 
+
     while not(is_key_pressed(exit_key)):
         screenshot = numpy.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
@@ -70,17 +113,23 @@ def main():
         active_match = cv2.matchTemplate(screenshot_r, active, cv2.TM_CCOEFF_NORMED)
         _, active_max_val, _, active_max_loc = cv2.minMaxLoc(active_match)
         active_max_loc = (active_max_loc[0] + active_w/2, active_max_loc[1] + active_h/2)
-        print(active_max_val, active_max_loc, to_game_cords(active_max_loc))
+        # print(active_max_val, active_max_loc, to_game_cords(active_max_loc))
 
         enemy_match = cv2.matchTemplate(screenshot_r, enemy, cv2.TM_CCOEFF_NORMED)
         enemies = get_enemies(enemy_match, enemy_threshold, enemy_w, enemy_h)
-        print(enemies)
+        # print(enemies)
+        # detect_black_circles(screenshot_r)
+
+        black_circles, screenshot_r = detect_black_circles(screenshot_r)
+
+        # print(black_circles)
+
 
         # if max_val > threshold:
         #     print('YES')
-
-        cv2.imshow('GraphBot', screenshot_r)
-        cv2.waitKey(1)
+        # if screenshot_r is not None:
+        #     cv2.imshow('GraphBot', screenshot_r)
+        #     cv2.waitKey(1)
 
 if __name__ == '__main__':
 
@@ -93,4 +142,3 @@ if __name__ == '__main__':
         pass
 
     main()
-    
