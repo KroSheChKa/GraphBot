@@ -52,19 +52,19 @@ def detect_black_circles(s_r):
     s_r = cv2.GaussianBlur(s_r, (3, 3), 0)
 
     lower_bound = 0
-    upper_bound = 30
+    upper_bound = 20
 
     # Создаем маску: пиксели в диапазоне [240, 255] будут оставлены, остальные заменим на белый
     mask = cv2.inRange(s_r, lower_bound, upper_bound)
 
     result = numpy.ones_like(s_r) * 255  # Изначально делаем все белыми
     result[mask == 255] = 0  # Пиксели, попадающие в маску, делаем черными
-    result = cv2.GaussianBlur(result, (15, 15), 0)
+    result = cv2.GaussianBlur(result, (11, 11), 0)
 
     # Apply Hough transform on the blurred image. 
     detected_circles = cv2.HoughCircles(result,  
-                    cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 50, 
-                param2 = 32, minRadius = 3, maxRadius = 200) 
+                    cv2.HOUGH_GRADIENT, 1, minDist= 15, param1 = 50, 
+                param2 = 28, minRadius = 1, maxRadius = 200) 
     
     # Draw circles that are detected. 
     if detected_circles is not None: 
