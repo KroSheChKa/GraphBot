@@ -44,9 +44,9 @@ def get_enemies(mss_, threshold, enemy, w, h):
     print(rectangles)
     enemies = []
     for i in range(len(rectangles)):
-        x = to_game_cords(float(rectangles[i][0]) + w/2)
-        y = 15 - to_game_cords(float(rectangles[i][1]) + h/2)
-        enemies.append((l_field['left']+float(rectangles[i][0]), float(rectangles[i][1])))
+        # x = to_game_cords(float(rectangles[i][0]) + w/2)
+        # y = 15 - to_game_cords(float(rectangles[i][1]) + h/2)
+        enemies.append((w/2+float(rectangles[i][0])-1, h/2+float(rectangles[i][1])-1))
     return enemies
 
 def detect_black_circles(s_r):
@@ -82,8 +82,9 @@ def draw_circles(detected_circles, screenshot_r):
     return screenshot_r
 
 def draw_circles1(detected_circles, screenshot_r):
+    r = 10
     for pt in detected_circles: 
-            a, b, r = int(pt[0]), int(pt[1]), 26 
+            a, b = int(pt[0]), int(pt[1])
             print(a, b, r)
             cv2.circle(screenshot_r, (a, b), r, (150, 0, 0), 2) 
     return screenshot_r
@@ -100,7 +101,7 @@ def main():
     mss_ = mss.mss()
 
     active_threshold = 0.72
-    enemy_threshold = 0.7
+    enemy_threshold = 0.65
 
     while not(is_key_pressed(exit_key)):
         screenshot = numpy.array(mss_.grab(field))
@@ -116,9 +117,9 @@ def main():
             screenshot_r = draw_circles(circles_cords, screenshot_r)
             print(circles_cords)
 
-        enemies = get_enemies(mss_, enemy_threshold, enemy, enemy_w, enemy_h)
-        print(enemies)
-        screenshot_r = draw_circles1(enemies, screenshot_r)
+        # enemies = get_enemies(mss_, enemy_threshold, enemy, enemy_w, enemy_h)
+        # print(enemies)
+        # screenshot_r = draw_circles1(enemies, screenshot_r)
         
 
         cv2.imshow('GraphBot', screenshot_r)
