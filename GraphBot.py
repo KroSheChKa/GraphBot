@@ -108,9 +108,13 @@ def to_game_cords(cord_list):
         new_list.append([x, y])
     return new_list
 
+def direct_line(p1, p2): #x1 y1   x2 y2
+    dist = ((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00000001)
+    print(dist)
+    return f'- {dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+')
+
 def main():
     mss_ = mss.mss()
-
     while not(is_key_pressed(exit_key)):
         screenshot = np.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
@@ -127,16 +131,28 @@ def main():
             print(players_cords)
 
         good_guys, bad_guys, active_player = separate(players_cords.tolist())
-        good_guys_norm = to_game_cords(good_guys)
-        bad_guys_norm = to_game_cords(bad_guys)
-        
+        good_guys_norm = sorted(to_game_cords(good_guys), key= lambda x:x[0])
+        bad_guys_norm = sorted(to_game_cords(bad_guys), key= lambda x:x[0])
+        active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
+
         print()
         print("Players detected:", len(players_cords[0]))
         print("Active player:", active_player)
+        print("Normalized:", active_norm)
         print("Good guys:", good_guys)
         print("Normalized:", good_guys_norm)
         print("Bad guys:", bad_guys)
         print("Normalized:", bad_guys_norm)
+
+
+        print(bad_guys_norm[0])
+        print()
+        print()
+        a = direct_line(active_norm, bad_guys_norm[0])
+        for i in range(1, len(bad_guys)):
+            a += '+' + direct_line(bad_guys_norm[i-1], bad_guys_norm[i])
+        print(a)
+
 
         cv2.imshow('GraphBot', screenshot_r)
         cv2.waitKey(1)
