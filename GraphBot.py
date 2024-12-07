@@ -23,11 +23,6 @@ def sleep_key(sec):
             break
 
 
-
-def to_game_cords(a):
-    temp = a / field['height'] * 30
-    return temp
-
 def detect_black_circles(s_r):
     s_r = cv2.GaussianBlur(s_r, (3, 3), 0)
 
@@ -87,7 +82,6 @@ def draw_circles(circles, screenshot_r):
             cv2.circle(screenshot_r, (a, b), 1, (255, 0, 0), 3) 
     return screenshot_r
 
-
 def separate(players):
     active = players[0][0]
     good = []
@@ -98,14 +92,21 @@ def separate(players):
             active = i
         
         if i[0] > field['width'] / 2:
-            bad.append(i)
+            bad.append(i[:2])
         else:
             if i[2] > active[2]:
                 active = i
-            good.append(i)
+            good.append(i[:2])
     
-    return good, bad, active
+    return good, bad, active[:2]
 
+def to_game_cords(cord_list):
+    new_list = []
+    for i in cord_list:
+        x = -25 + i[0]*50/field['width']
+        y = 15 - i[1]*50/field['width']
+        new_list.append([x, y])
+    return new_list
 
 def main():
     mss_ = mss.mss()
@@ -126,12 +127,17 @@ def main():
             print(players_cords)
 
         good_guys, bad_guys, active_player = separate(players_cords.tolist())
-
+        good_guys_norm = to_game_cords(good_guys)
+        bad_guys_norm = to_game_cords(bad_guys)
+        
         print()
         print("Players detected:", len(players_cords[0]))
         print("Active player:", active_player)
         print("Good guys:", good_guys)
+        print("Normalized:", good_guys_norm)
         print("Bad guys:", bad_guys)
+        print("Normalized:", bad_guys_norm)
+
         cv2.imshow('GraphBot', screenshot_r)
         cv2.waitKey(1)
 
