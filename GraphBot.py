@@ -28,27 +28,6 @@ def to_game_cords(a):
     temp = a / field['height'] * 30
     return temp
 
-# def get_enemies(mss_, threshold, enemy, w, h):
-#     screenshot = np.array(mss_.grab(field))
-#     screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
-
-#     enemy_match = cv2.matchTemplate(screenshot_r, enemy, cv2.TM_CCOEFF_NORMED)
-#     enemy_yloc, enemy_xloc = np.where(enemy_match > threshold)
-
-#     rectangles = []
-#     for (x, y) in zip(enemy_xloc, enemy_yloc):
-#         rectangles.append([x, y, w, h])
-#         rectangles.append([x, y, w, h])
-    
-#     rectangles, _ = cv2.groupRectangles(rectangles, 1, 0.3)
-#     print(rectangles)
-#     enemies = []
-#     for i in range(len(rectangles)):
-#         # x = to_game_cords(float(rectangles[i][0]) + w/2)
-#         # y = 15 - to_game_cords(float(rectangles[i][1]) + h/2)
-#         enemies.append((w/2+float(rectangles[i][0])-1, h/2+float(rectangles[i][1])-1))
-#     return enemies
-
 def detect_black_circles(s_r):
     s_r = cv2.GaussianBlur(s_r, (3, 3), 0)
 
@@ -73,18 +52,23 @@ def detect_black_circles(s_r):
         return None
 
 def detet_players(s_r):
-    lower_bound = 60
-    upper_bound = 254
+    lower_bound = 50
+    upper_bound = 250
 
-    mask = cv2.inRange(s_r, lower_bound, upper_bound)
+    mask1 = cv2.inRange(s_r, lower_bound, 169)
+    mask2 = cv2.inRange(s_r, 171, upper_bound)
+    mask = cv2.bitwise_or(mask1, mask2)
+
+    # mask = cv2.inRange(s_r, lower_bound, upper_bound)
 
     result = np.ones_like(s_r) * 255
     result[mask == 255] = 0
-    result = cv2.GaussianBlur(result, (21, 21), 0)
+    blur_rate = 23
+    result = cv2.GaussianBlur(result, (blur_rate, blur_rate), 0)
 
     detected_circles = cv2.HoughCircles(result,  
-                    cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 150, 
-                param2 = 15, minRadius = 1, maxRadius = 15) 
+        cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 150, 
+        param2 = 10, minRadius = 4, maxRadius = 15) 
     
     # cv2.imshow('GraphBot', result)
     # cv2.waitKey(1)
@@ -105,27 +89,16 @@ def draw_circles(circles, screenshot_r):
 
 
 def main():
-    active = cv2.imread(r'Assets\active.png', 0)
-    active_w = active.shape[1]
-    active_h = active.shape[0]
-    
+
     enemy = cv2.imread(r'Assets\enemy.png', 0)
     enemy_w = enemy.shape[1]
     enemy_h = enemy.shape[0]
 
     mss_ = mss.mss()
 
-    active_threshold = 0.72
-    enemy_threshold = 0.65
-
     while not(is_key_pressed(exit_key)):
         screenshot = np.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
-
-        active_match = cv2.matchTemplate(screenshot_r, active, cv2.TM_CCOEFF_NORMED)
-        _, active_max_val, _, active_max_loc = cv2.minMaxLoc(active_match)
-        active_max_loc = (active_max_loc[0] + active_w/2, active_max_loc[1] + active_h/2)
-        print(active_max_val, active_max_loc)
 
         circles_cords = detect_black_circles(screenshot_r)
         
@@ -138,6 +111,9 @@ def main():
             screenshot_r = draw_circles(players_cords, screenshot_r)
             print(players_cords)
 
+        active_player = players_cords[0][0]
+
+        print(len(players_cords[0]), active_player)
         # enemies = get_enemies(mss_, enemy_threshold, enemy, enemy_w, enemy_h)
         # print(enemies)
         # screenshot_r = draw_circles1(enemies, screenshot_r)
