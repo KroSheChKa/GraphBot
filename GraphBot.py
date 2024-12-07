@@ -51,7 +51,7 @@ def detect_black_circles(s_r):
         print('Oops!')
         return None
 
-def detet_players(s_r):
+def detect_players(s_r):
     lower_bound = 50
     upper_bound = 250
 
@@ -74,7 +74,7 @@ def detet_players(s_r):
     # cv2.waitKey(1)
 
     if detected_circles is not None: 
-        detected_circles = np.uint16(np.around(detected_circles)) 
+        detected_circles = np.uint16(np.around(detected_circles))
         return detected_circles
     else:
         print('Oops!')
@@ -88,12 +88,26 @@ def draw_circles(circles, screenshot_r):
     return screenshot_r
 
 
+def separate(players):
+    active = players[0][0]
+    good = []
+    bad = []
+    
+    for i in players[0]:
+        if i[2] > active[2]:
+            active = i
+        
+        if i[0] > field['width'] / 2:
+            bad.append(i)
+        else:
+            if i[2] > active[2]:
+                active = i
+            good.append(i)
+    
+    return good, bad, active
+
+
 def main():
-
-    enemy = cv2.imread(r'Assets\enemy.png', 0)
-    enemy_w = enemy.shape[1]
-    enemy_h = enemy.shape[0]
-
     mss_ = mss.mss()
 
     while not(is_key_pressed(exit_key)):
@@ -106,19 +120,18 @@ def main():
         #     screenshot_r = draw_circles(circles_cords, screenshot_r)
         #     print(circles_cords)
 
-        players_cords = detet_players(screenshot_r)
+        players_cords = detect_players(screenshot_r)
         if players_cords is not None:
             screenshot_r = draw_circles(players_cords, screenshot_r)
             print(players_cords)
 
-        active_player = players_cords[0][0]
+        good_guys, bad_guys, active_player = separate(players_cords.tolist())
 
-        print(len(players_cords[0]), active_player)
-        # enemies = get_enemies(mss_, enemy_threshold, enemy, enemy_w, enemy_h)
-        # print(enemies)
-        # screenshot_r = draw_circles1(enemies, screenshot_r)
-        
-
+        print()
+        print("Players detected:", len(players_cords[0]))
+        print("Active player:", active_player)
+        print("Good guys:", good_guys)
+        print("Bad guys:", bad_guys)
         cv2.imshow('GraphBot', screenshot_r)
         cv2.waitKey(1)
 
