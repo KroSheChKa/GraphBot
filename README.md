@@ -11,3 +11,6 @@ https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
 "Fake" piecewise function
 ![image](https://github.com/user-attachments/assets/0ef7b1f7-0342-4c67-96f0-3e5dab0feb5d)
 
+**Click mode**
+
+![20241229000123_1](https://github.com/user-attachments/assets/e94bcb04-1525-41aa-baf6-3bdedf8124d5)
