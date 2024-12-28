@@ -3,12 +3,18 @@ import mss
 import sys, ctypes
 import time
 import numpy as np
+import win32api, win32con, win32gui
+import pyperclip
 
 start_key = 0x70 # f1
 exit_key = 0x71 # f2
+clicks_start = 0x72 # f3
+clicks_end = 0x73 # f4
+rejime = 1 # 0 - usual detection | 1 - clicks
 
 def is_key_pressed(key):
     return ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000 != 0
+
 
 def sleep_key(sec):
     start_time = time.time()
@@ -110,8 +116,22 @@ def to_game_cords(cord_list):
 
 def direct_line(p1, p2): #x1 y1   x2 y2
     dist = ((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00000001)
-    print(dist)
+    # print(dist)
     return f'- {dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+')
+
+def collect_clicks():
+    left_mouse_key = 0x01
+    clicks = []
+    while not is_key_pressed(clicks_start):
+        pass
+    while not is_key_pressed(clicks_end):
+        if is_key_pressed(left_mouse_key):
+            (x, y) = win32gui.GetCursorPos()
+            print((x, y))
+            clicks.append((x - field['left'], y - field['top']))
+            win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP,0)    
+    return clicks
+
 
 def main():
     mss_ = mss.mss()
@@ -119,43 +139,65 @@ def main():
         screenshot = np.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
 
-        circles_cords = detect_black_circles(screenshot_r)
-        
-        # if circles_cords is not None:
-        #     screenshot_r = draw_circles(circles_cords, screenshot_r)
-        #     print(circles_cords)
+        if not rejime:
+            # circles_cords = detect_black_circles(screenshot_r)
+            
+            # if circles_cords is not None:
+            #     screenshot_r = draw_circles(circles_cords, screenshot_r)
+            #     print(circles_cords)
 
-        players_cords = detect_players(screenshot_r)
-        if players_cords is not None:
-            screenshot_r = draw_circles(players_cords, screenshot_r)
-            print(players_cords)
+            players_cords = detect_players(screenshot_r)
+            if players_cords is not None:
+                screenshot_r = draw_circles(players_cords, screenshot_r)
+                print(players_cords)
 
-        good_guys, bad_guys, active_player = separate(players_cords.tolist())
-        good_guys_norm = sorted(to_game_cords(good_guys), key= lambda x:x[0])
-        bad_guys_norm = sorted(to_game_cords(bad_guys), key= lambda x:x[0])
-        active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
+            good_guys, bad_guys, active_player = separate(players_cords.tolist())
+            good_guys_norm = sorted(to_game_cords(good_guys), key= lambda x:x[0])
+            bad_guys_norm = sorted(to_game_cords(bad_guys), key= lambda x:x[0])
+            active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
 
-        print()
-        print("Players detected:", len(players_cords[0]))
-        print("Active player:", active_player)
-        print("Normalized:", active_norm)
-        print("Good guys:", good_guys)
-        print("Normalized:", good_guys_norm)
-        print("Bad guys:", bad_guys)
-        print("Normalized:", bad_guys_norm)
-
-
-        print(bad_guys_norm[0])
-        print()
-        print()
-        a = direct_line(active_norm, bad_guys_norm[0])
-        for i in range(1, len(bad_guys)):
-            a += '+' + direct_line(bad_guys_norm[i-1], bad_guys_norm[i])
-        print(a)
+            print()
+            print("Players detected:", len(players_cords[0]))
+            print("Active player:", active_player)
+            print("Normalized:", active_norm)
+            print("Good guys:", good_guys)
+            print("Normalized:", good_guys_norm)
+            print("Bad guys:", bad_guys)
+            print("Normalized:", bad_guys_norm)
 
 
-        cv2.imshow('GraphBot', screenshot_r)
-        cv2.waitKey(1)
+            print(bad_guys_norm[0])
+            print()
+            print()
+            a = direct_line(active_norm, bad_guys_norm[0])
+
+
+            for i in range(1, len(bad_guys)):
+                a += '+' + direct_line(bad_guys_norm[i-1], bad_guys_norm[i])
+
+            cv2.imshow('GraphBot', screenshot_r)
+            cv2.waitKey(1)
+        else:
+            clicks = collect_clicks()
+            print(clicks)
+            clicks_norm = sorted(to_game_cords(clicks), key= lambda x:x[0])
+            print(clicks_norm)
+
+            players_cords = detect_players(screenshot_r)
+            _, _, active_player = separate(players_cords.tolist())
+            print("Active player:", active_player)
+            active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
+            print("Active player norm:", active_norm)
+
+            a = direct_line(active_norm, clicks_norm[0])
+            print("HERE", a, active_norm, clicks_norm[0])
+
+            for i in range(1, len(clicks)):
+                a += '+' + direct_line(clicks_norm[i-1], clicks_norm[i])
+            print()
+            print(a)
+            pyperclip.copy(a)
+
 
 if __name__ == '__main__':
 
