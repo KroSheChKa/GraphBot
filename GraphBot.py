@@ -1,3 +1,43 @@
+"""
+=========================================================
+ GraphBot.py
+=========================================================
+Description:
+    A Python bot for generating and manipulating graphs.
+
+Author: KroSheChKa
+Github: https://github.com/KroSheChKa/GraphBot
+License: MIT License
+Date: 2024-12-05
+=========================================================
+
+MIT License
+
+Copyright (c) 2024 KroSheChKa
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+=========================================================
+"""
+
+# =========================================================
+# Imports
+# =========================================================
 import cv2
 import mss
 import sys, ctypes
@@ -6,14 +46,24 @@ import numpy as np
 import win32api, win32con, win32gui
 import pyperclip
 
-start_key = 0x70 # f1
-exit_key = 0x71 # f2
-clicks_start = 0x72 # f3
-clicks_end = 0x73 # f4
-rejime = 1 # 0 - usual detection | 1 - clicks
-
+# =========================================================
+# Functions
+# =========================================================
 def is_key_pressed(key):
     return ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000 != 0
+
+def move_window(window_title, x, y, width, height):
+    hwnd = win32gui.FindWindow(None, window_title)
+    if hwnd == 0:
+        print(f"Windown '{window_title}' is not found.")
+        return
+    
+    rect = win32gui.GetWindowRect(hwnd)
+    width = rect[2] - rect[0]
+    height = rect[3] - rect[1]
+
+    win32gui.MoveWindow(hwnd, x, y, width, height, True)
+    print(f"Window '{window_title}' moved to ({x}, {y}).")
 
 
 def sleep_key(sec):
@@ -132,8 +182,14 @@ def collect_clicks():
             win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP,0)    
     return clicks
 
+def safe_copy(text, previous_text):
+    if text != previous_text:
+        pyperclip.copy(text)
+        print("Safely copied!")
 
 def main():
+    move_window("Graphwar", -7, 0, 100, 100)
+    prev_text = ""
     mss_ = mss.mss()
     while not(is_key_pressed(exit_key)):
         screenshot = np.array(mss_.grab(field))
@@ -174,6 +230,11 @@ def main():
 
             for i in range(1, len(bad_guys)):
                 a += '+' + direct_line(bad_guys_norm[i-1], bad_guys_norm[i])
+            print()
+            print(a)
+
+            safe_copy(a, prev_text)
+            prev_text = a
 
             cv2.imshow('GraphBot', screenshot_r)
             cv2.waitKey(1)
@@ -196,17 +257,28 @@ def main():
                 a += '+' + direct_line(clicks_norm[i-1], clicks_norm[i])
             print()
             print(a)
-            pyperclip.copy(a)
 
+            safe_copy(a, prev_text)
+            prev_text = a
 
+# =========================================================
+# Main Program
+# =========================================================
 if __name__ == '__main__':
+    start_key = 0x70 # f1
+    exit_key = 0x71 # f2
+    clicks_start = 0x72 # f3
+    clicks_end = 0x73 # f4
+    # 0 - usual detection
+    # 1 - clicks
+    rejime = 1
 
-    field = {'left': 13,
+    field = {'left': 14,
              'top': 52,
              'width': 772,
              'height': 452}
     
     while not(is_key_pressed(start_key)):
         pass
-
+    
     main()
