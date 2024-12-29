@@ -1,9 +1,36 @@
 """
+   ____                     _      ____          _   
+  / ___| _ __  __ _  _ __  | |__  | __ )   ___  | |_ 
+ | |  _ | '__|/ _` || '_ \ | '_ \ |  _ \  / _ \ | __|
+ | |_| || |  | (_| || |_) || | | || |_) || (_) || |_ 
+  \____||_|   \__,_|| .__/ |_| |_||____/  \___/  \__|
+                    |_|    
+                          
+                            15
+                            ▲ enemy
+                            │   X
+                            │  * *
+                            │ *   *
+                            │*     *
+                            *      enemy        enemy
+                           *│        X************X
+-25 ──────────────────────*─│────────────────────────► 25
+                         *  │
+           KroSheChKa  **   │
+                @******     │
+                            │
+                            │
+                            │
+                            -15
+
 =========================================================
  GraphBot.py
 =========================================================
 Description:
-    A Python bot for generating and manipulating graphs.
+    GraphBot is a tool that automatically plots straight-line trajectories from
+    the active player to all enemies on the game field, enabling precise targeting.
+    It also features a manual mode for creating custom paths by clicking on the
+    field, perfect for avoiding obstacles like black spheres.
 
 Author: KroSheChKa
 Github: https://github.com/KroSheChKa/GraphBot
