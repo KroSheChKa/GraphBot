@@ -79,25 +79,38 @@ import pyperclip
 def is_key_pressed(key):
     return ctypes.windll.user32.GetAsyncKeyState(key) & 0x8000 != 0
 
+# A function to print out the status of finishing of the program and exiting it
+def safe_exit(exit_code):
+    print(exit_codes[exit_code])
+    sys.exit()
+
+# A function to move the game windown to a certain position
 def move_window(window_title, x, y, width, height):
+    # Trying to get the grapwar window
     hwnd = win32gui.FindWindow(None, window_title)
+
+    # If this code exited on that moment, it means you need to pass
+    # the first arg (name of the game window) as it typed in the 
+    # upper part of the game screen 
     if hwnd == 0:
-        print(f"Windown '{window_title}' is not found.")
-        return
-    
+        safe_exit(1)
+        
+    # As function MoveWindow gets 6 args including the width and height
+    # of the window, which we do not care, just set as it is
     rect = win32gui.GetWindowRect(hwnd)
     width = rect[2] - rect[0]
     height = rect[3] - rect[1]
 
+    # win32gui.SetActiveWindow(hwnd)
     win32gui.MoveWindow(hwnd, x, y, width, height, True)
     print(f"Window '{window_title}' moved to ({x}, {y}).")
 
-
+# More accurate sleep function with ability to exit the
 def sleep_key(sec):
     start_time = time.time()
     while True:
         if is_key_pressed(exit_key):
-            sys.exit()
+            safe_exit(0)
         
         current_time = time.time()
         elapsed_time = current_time - start_time
@@ -105,7 +118,7 @@ def sleep_key(sec):
         if elapsed_time >= sec:
             break
 
-
+# Function to detect the cords and radius of the black circles
 def detect_black_circles(s_r):
     s_r = cv2.GaussianBlur(s_r, (3, 3), 0)
 
@@ -126,36 +139,38 @@ def detect_black_circles(s_r):
         detected_circles = np.uint16(np.around(detected_circles)) 
         return detected_circles
     else:
-        print('Oops!')
+        print('Probably there is no black circles. It might be a mistake')
         return None
 
 def detect_players(s_r):
+    # These the interval in grayscale to mask (delete unneeded details)
     lower_bound = 50
     upper_bound = 250
 
     mask1 = cv2.inRange(s_r, lower_bound, 169)
     mask2 = cv2.inRange(s_r, 171, upper_bound)
     mask = cv2.bitwise_or(mask1, mask2)
-
-    # mask = cv2.inRange(s_r, lower_bound, upper_bound)
-
+    
     result = np.ones_like(s_r) * 255
     result[mask == 255] = 0
+
+    # Well, actually without blur func.GaussianBlur working pretty badly
     blur_rate = 23
     result = cv2.GaussianBlur(result, (blur_rate, blur_rate), 0)
 
+    # A magic formula to get the circles
     detected_circles = cv2.HoughCircles(result,  
         cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 150, 
         param2 = 10, minRadius = 4, maxRadius = 15) 
     
-    # cv2.imshow('GraphBot', result)
-    # cv2.waitKey(1)
+    cv2.imshow('GraphBot', result)
+    cv2.waitKey(1)
 
     if detected_circles is not None: 
         detected_circles = np.uint16(np.around(detected_circles))
         return detected_circles
     else:
-        print('Oops!')
+        print('Probably there is no players. It might be a mistake')
         return None
 
 def draw_circles(circles, screenshot_r):
@@ -194,10 +209,11 @@ def to_game_cords(cord_list):
 def direct_line(p1, p2): #x1 y1   x2 y2
     dist = ((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00000001)
     # print(dist)
-    return f'- {dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+')
+    return f'{-dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+ ')
 
+# A function to collect the cords of the clicks 
+# + subsctract the offsets
 def collect_clicks():
-    left_mouse_key = 0x01
     clicks = []
     while not is_key_pressed(clicks_start):
         pass
@@ -209,13 +225,16 @@ def collect_clicks():
             win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP,0)    
     return clicks
 
+# Prevents unnesessary clipboard copying
 def safe_copy(text, previous_text):
     if text != previous_text:
         pyperclip.copy(text)
         print("Safely copied!")
 
 def main():
-    move_window("Graphwar", -7, 0, 100, 100)
+    # I set the x position of the windown to -7 due to gap between the
+    # left border of the game window and left side of the screen 
+    move_window(game_window_name, -7, 0, 100, 100)
     prev_text = ""
     mss_ = mss.mss()
     while not(is_key_pressed(exit_key)):
@@ -223,11 +242,11 @@ def main():
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
 
         if not rejime:
-            # circles_cords = detect_black_circles(screenshot_r)
+            circles_cords = detect_black_circles(screenshot_r)
             
-            # if circles_cords is not None:
-            #     screenshot_r = draw_circles(circles_cords, screenshot_r)
-            #     print(circles_cords)
+            if circles_cords is not None:
+                screenshot_r = draw_circles(circles_cords, screenshot_r)
+                # print(circles_cords)
 
             players_cords = detect_players(screenshot_r)
             if players_cords is not None:
@@ -252,19 +271,18 @@ def main():
             print(bad_guys_norm[0])
             print()
             print()
-            a = direct_line(active_norm, bad_guys_norm[0])
-
+            a = [direct_line(active_norm, bad_guys_norm[0])]
 
             for i in range(1, len(bad_guys)):
-                a += '+' + direct_line(bad_guys_norm[i-1], bad_guys_norm[i])
-            print()
-            print(a)
+                a.append(direct_line(bad_guys_norm[i-1], bad_guys_norm[i]))
+            
+            formula = ' + '.join(a).replace('+ -', '- ')
+            print(formula)
+            safe_copy(formula, prev_text)
+            prev_text = formula
 
-            safe_copy(a, prev_text)
-            prev_text = a
-
-            cv2.imshow('GraphBot', screenshot_r)
-            cv2.waitKey(1)
+            # cv2.imshow("GraphBot", screenshot_r)
+            # cv2.waitKey(1)
         else:
             clicks = collect_clicks()
             print(clicks)
@@ -276,22 +294,26 @@ def main():
             print("Active player:", active_player)
             active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
             print("Active player norm:", active_norm)
-
-            a = direct_line(active_norm, clicks_norm[0])
-            print("HERE", a, active_norm, clicks_norm[0])
+            
+            a = [direct_line(active_norm, clicks_norm[0])]
+            # print("HERE", a, active_norm, clicks_norm[0])
 
             for i in range(1, len(clicks)):
-                a += '+' + direct_line(clicks_norm[i-1], clicks_norm[i])
+                a.append(direct_line(clicks_norm[i-1], clicks_norm[i]))
             print()
-            print(a)
 
-            safe_copy(a, prev_text)
-            prev_text = a
+            formula = ' + '.join(a).replace('+ -', '- ')
+            print(formula)
+            safe_copy(formula, prev_text)
+            prev_text = formula
+
+            safe_exit(0)
 
 # =========================================================
 # Main Program
 # =========================================================
 if __name__ == '__main__':
+    left_mouse_key = 0x01
     start_key = 0x70 # f1
     exit_key = 0x71 # f2
     clicks_start = 0x72 # f3
@@ -299,6 +321,11 @@ if __name__ == '__main__':
     # 0 - usual detection
     # 1 - clicks
     rejime = 1
+    game_window_name = 'Graphwar'
+    exit_codes = {
+        0: "Program has successfuly finished!",
+        1: "No window with game name has found :(\nTry to rename variable 'game_window_name'"
+    }
 
     field = {'left': 14,
              'top': 52,
