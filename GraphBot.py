@@ -184,18 +184,15 @@ def separate(players):
     active = players[0][0]
     good = []
     bad = []
-    
     for i in players[0]:
         if i[2] > active[2]:
             active = i
-        
         if i[0] > field['width'] / 2:
             bad.append(i[:2])
         else:
             if i[2] > active[2]:
                 active = i
             good.append(i[:2])
-    
     return good, bad, active[:2]
 
 def to_game_cords(cord_list):
@@ -207,13 +204,12 @@ def to_game_cords(cord_list):
     return new_list
 
 def direct_line(p1, p2): #x1 y1   x2 y2
-    dist = ((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00000001)
-    # print(dist)
-    return f'{-dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+ ')
+    dist = -((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00001)
+    return f'{dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+ ')
 
 # A function to collect the cords of the clicks 
 # + subsctract the offsets
-def collect_clicks():
+def collect_clicks(active_player_x):
     print("Click wherever on the game screen")
     clicks = []
     while not is_key_pressed(clicks_start):
@@ -221,8 +217,14 @@ def collect_clicks():
     while not is_key_pressed(clicks_end):
         if is_key_pressed(left_mouse_key):
             (x, y) = win32gui.GetCursorPos()
+            if x < active_player_x:
+                x = active_player_x + 3
+                print(f"You have clicked to the left of your active player!\nThe x cordinate set to {x}: ({x}, {y - field['top']})")
+            else:
+                x -= field['left']
+            y -= field['top']
             print((x, y))
-            clicks.append((x - field['left'], y - field['top']))
+            clicks.append((x, y))
             win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP, 0)
     return clicks
 
@@ -240,7 +242,7 @@ def setup():
     # Handling user mode input
     # 0 - usual detection
     # 1 - clicks
-    while True:
+    while not(is_key_pressed(exit_key)):
         print("Select the mode\n0 - automatic (straight lines)\n1 - clicks")
         mode = input()
         if len(mode) == 1 and (mode == '0' or mode == '1'):
@@ -257,11 +259,10 @@ def main():
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
 
         if not mode:
-            circles_cords = detect_black_circles(screenshot_r)
-            
-            if circles_cords is not None:
-                screenshot_r = draw_circles(circles_cords, screenshot_r)
-                # print(circles_cords)
+            # circles_cords = detect_black_circles(screenshot_r)
+            # if circles_cords is not None:
+            #     screenshot_r = draw_circles(circles_cords, screenshot_r)
+            #     # print(circles_cords)
 
             players_cords = detect_players(screenshot_r)
             if players_cords is not None:
@@ -299,17 +300,18 @@ def main():
             cv2.imshow("GraphBot", screenshot_r)
             cv2.waitKey(1)
         else:
-            clicks = collect_clicks()
-            print(clicks)
-            clicks_norm = sorted(to_game_cords(clicks), key= lambda x:x[0])
-            print(clicks_norm)
-
             players_cords = detect_players(screenshot_r)
             _, _, active_player = separate(players_cords.tolist())
             print("Active player:", active_player)
             active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
             print("Active player norm:", active_norm)
             
+            clicks = collect_clicks(active_player[0])
+            print(clicks)
+            clicks_norm = sorted(to_game_cords(clicks), key= lambda x:x[0])
+            print(clicks_norm)
+
+
             a = [direct_line(active_norm, clicks_norm[0])]
             # print("HERE", a, active_norm, clicks_norm[0])
 
@@ -334,7 +336,7 @@ if __name__ == '__main__':
     clicks_start = 0x72 # f3
     clicks_end = 0x73 # f4
 
-    window_start_cords = (-7, 7)
+    window_start_cords = (-7, 0)
     game_window_name = 'Graphwar'
     exit_codes = {
         0: "Program has successfuly finished!",
