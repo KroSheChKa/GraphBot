@@ -4,8 +4,8 @@
  | |  _ | '__|/ _` || '_ \ | '_ \ |  _ \  / _ \ | __|
  | |_| || |  | (_| || |_) || | | || |_) || (_) || |_ 
   \____||_|   \__,_|| .__/ |_| |_||____/  \___/  \__|
-                    |_|    
-                          
+                    |_|
+                    
                             15
                             ▲ enemy
                             │   X
@@ -21,7 +21,7 @@
                             │
                             │
                             │
-                            -15
+                           -15
 
 =========================================================
  GraphBot.py
@@ -131,12 +131,12 @@ def detect_black_circles(s_r):
     result[mask == 255] = 0
     result = cv2.GaussianBlur(result, (13, 13), 0)
 
-    detected_circles = cv2.HoughCircles(result,  
-                    cv2.HOUGH_GRADIENT, 1, minDist= 15, param1 = 50, 
-                param2 = 25, minRadius = 1, maxRadius = 200) 
+    detected_circles = cv2.HoughCircles(result,
+                    cv2.HOUGH_GRADIENT, 1, minDist= 15, param1 = 50,
+                param2 = 25, minRadius = 1, maxRadius = 200)
     
-    if detected_circles is not None: 
-        detected_circles = np.uint16(np.around(detected_circles)) 
+    if detected_circles is not None:
+        detected_circles = np.uint16(np.around(detected_circles))
         return detected_circles
     else:
         print('Probably there is no black circles. It might be a mistake')
@@ -159,12 +159,12 @@ def detect_players(s_r):
     result = cv2.GaussianBlur(result, (blur_rate, blur_rate), 0)
 
     # A magic formula to get the circles
-    detected_circles = cv2.HoughCircles(result,  
-        cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 150, 
-        param2 = 10, minRadius = 4, maxRadius = 15) 
+    detected_circles = cv2.HoughCircles(result,
+        cv2.HOUGH_GRADIENT, 1, minDist= 10, param1 = 150,
+        param2 = 10, minRadius = 4, maxRadius = 15)
     
-    cv2.imshow('GraphBot', result)
-    cv2.waitKey(1)
+    # cv2.imshow('GraphBot', result)
+    # cv2.waitKey(1)
 
     if detected_circles is not None: 
         detected_circles = np.uint16(np.around(detected_circles))
@@ -174,10 +174,10 @@ def detect_players(s_r):
         return None
 
 def draw_circles(circles, screenshot_r):
-    for pt in circles[0,:]: 
-            a, b, r = pt[0], pt[1], pt[2] 
-            cv2.circle(screenshot_r, (a, b), r, (100, 0, 0), 2) 
-            cv2.circle(screenshot_r, (a, b), 1, (255, 0, 0), 3) 
+    for pt in circles[0,:]:
+            a, b, r = pt[0], pt[1], pt[2]
+            cv2.circle(screenshot_r, (a, b), r, (100, 0, 0), 2)
+            cv2.circle(screenshot_r, (a, b), 1, (255, 0, 0), 3)
     return screenshot_r
 
 def separate(players):
@@ -214,6 +214,7 @@ def direct_line(p1, p2): #x1 y1   x2 y2
 # A function to collect the cords of the clicks 
 # + subsctract the offsets
 def collect_clicks():
+    print("Click wherever on the game screen")
     clicks = []
     while not is_key_pressed(clicks_start):
         pass
@@ -222,7 +223,7 @@ def collect_clicks():
             (x, y) = win32gui.GetCursorPos()
             print((x, y))
             clicks.append((x - field['left'], y - field['top']))
-            win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP,0)    
+            win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP, 0)
     return clicks
 
 # Prevents unnesessary clipboard copying
@@ -231,17 +232,31 @@ def safe_copy(text, previous_text):
         pyperclip.copy(text)
         print("Safely copied!")
 
-def main():
+def setup():
     # I set the x position of the windown to -7 due to gap between the
     # left border of the game window and left side of the screen 
-    move_window(game_window_name, -7, 0, 100, 100)
+    move_window(game_window_name, window_start_cords[0], window_start_cords[1], 100, 100)
+    
+    # Handling user mode input
+    # 0 - usual detection
+    # 1 - clicks
+    while True:
+        print("Select the mode\n0 - automatic (straight lines)\n1 - clicks")
+        mode = input()
+        if len(mode) == 1 and (mode == '0' or mode == '1'):
+            mode = int(mode)
+            break
+        print("Incorrect input!\n")
+    return mode
+
+def main():
     prev_text = ""
     mss_ = mss.mss()
     while not(is_key_pressed(exit_key)):
         screenshot = np.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
 
-        if not rejime:
+        if not mode:
             circles_cords = detect_black_circles(screenshot_r)
             
             if circles_cords is not None:
@@ -281,8 +296,8 @@ def main():
             safe_copy(formula, prev_text)
             prev_text = formula
 
-            # cv2.imshow("GraphBot", screenshot_r)
-            # cv2.waitKey(1)
+            cv2.imshow("GraphBot", screenshot_r)
+            cv2.waitKey(1)
         else:
             clicks = collect_clicks()
             print(clicks)
@@ -318,14 +333,15 @@ if __name__ == '__main__':
     exit_key = 0x71 # f2
     clicks_start = 0x72 # f3
     clicks_end = 0x73 # f4
-    # 0 - usual detection
-    # 1 - clicks
-    rejime = 1
+
+    window_start_cords = (-7, 7)
     game_window_name = 'Graphwar'
     exit_codes = {
         0: "Program has successfuly finished!",
-        1: "No window with game name has found :(\nTry to rename variable 'game_window_name'"
+        1: "No window with the game name has found :(\nMake sure Graphwar is running"
     }
+
+    mode = setup()
 
     field = {'left': 14,
              'top': 52,
