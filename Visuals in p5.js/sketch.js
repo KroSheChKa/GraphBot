@@ -1,9 +1,9 @@
-var rows = 200;
-var cols = 200;
+var rows = 150;
+var cols = 150;
 var grid = [];
 
 var openSet = [];
-var closedSet= [];
+var closedSet = [];
 
 var w,h;
 var path = [];
@@ -16,13 +16,30 @@ var fps_counter = 0;
 var canvas_width = 750;
 var canvas_height = 750;
 
+function distTo(ax, ay, bx, by) {
+  return Math.sqrt((ax - bx)*(ax - bx) + (ay - by)*(ay - by));
+}
+
 function heuristic(a, b) {
   
-  var d = Math.sqrt((a.i - b.i)*(a.i - b.i) + (a.j - b.j)*(a.j - b.j));
-  // var d = max(abs(a.i - b.i), abs(a.j - b.j))
-  // var d = dist(a.i, a.j, b.i, b.j)
-  // var d = abs(a.i - b.i) + abs(a.j - b.j)
-  return d
+  var d = distTo(a.i, a.j, b.i, b.j)
+  
+  var margin = 5; // how close
+  var weight = 1.8 // affraidness
+  var penalty = 0;
+  
+  for (let i = 0; i < circles.length; i++) {
+    let cx = circles[i][0];
+    let cy = circles[i][1];
+    let r = circles[i][2];
+
+    let dToCircle = distTo(a.i, a.j, cx, cy);
+    if (dToCircle < r + margin) {
+      penalty += (r + margin - dToCircle);
+    }
+  }
+
+  return d + penalty * weight;
 }
 
 function removeFromArray(arr, el) {
@@ -204,9 +221,9 @@ function draw() {
   }
   
   
-  image(bgLayer, 0, 0);
   // drawing
-  if (fps_counter % 1 == 0) {
+  if (fps_counter % 5 == 0) {
+    image(bgLayer, 0, 0);
     
     for (let i = 0; i < closedSet.length; i++) {
       closedSet[i].show(color(230, 0, 0))
