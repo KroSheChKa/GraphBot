@@ -73,6 +73,11 @@ import numpy as np
 import win32api, win32con, win32gui
 import pyperclip
 
+from window_capture import find_game_window, get_capture_field, load_capture_margins
+from detection import find_all_obstacles, load_obstacles_params
+from avoidance import field_obstacles_to_game, DEFAULT_CLEARANCE
+from pathfinding import astar_game, build_enemy_chain_astar, draw_path_on_field
+
 # =========================================================
 # Functions
 # =========================================================
@@ -180,6 +185,12 @@ def draw_circles(circles, screenshot_r):
             cv2.circle(screenshot_r, (a, b), 1, (255, 0, 0), 3)
     return screenshot_r
 
+def draw_obstacle_circles(screenshot_bgr, obstacles):
+    for cx, cy, r in obstacles:
+        cv2.circle(screenshot_bgr, (int(cx), int(cy)), int(r), (255, 0, 255), 1)
+    return screenshot_bgr
+
+
 def separate(players):
     active = players[0][0]
     good = []
@@ -195,38 +206,135 @@ def separate(players):
             good.append(i[:2])
     return good, bad, active[:2]
 
+GAME_PRECISION = 5
+VERTICAL_MAX_COEFF = 999
+VERTICAL_MIN_EPS = 0.001
+CLICK_LEFT_TOLERANCE = 0.08  # ~1 px in game coords — ignore barely-left clicks
+
+
+def fmt_game(value):
+    """Round game coordinates and formula coefficients for Graphwar."""
+    return round(float(value), GAME_PRECISION)
+
+
+def vertical_eps(y_from, y_to, max_coeff=VERTICAL_MAX_COEFF):
+    """Pick eps so the steep segment coefficient stays within Graphwar limits."""
+    dy = abs(y_to - y_from)
+    if dy < 1e-9:
+        return VERTICAL_MIN_EPS
+    return max(VERTICAL_MIN_EPS, dy / (2 * max_coeff))
+
+
+def field_to_game(field_x, field_y):
+    game_x = -25 + field_x * 50 / field["width"]
+    game_y = 15 - field_y * 50 / field["width"]
+    return fmt_game(game_x), fmt_game(game_y)
+
+
 def to_game_cords(cord_list):
-    new_list = []
-    for i in cord_list:
-        x = -25 + i[0]*50/field['width']
-        y = 15 - i[1]*50/field['width']
-        new_list.append([x, y])
-    return new_list
+    return [list(field_to_game(i[0], i[1])) for i in cord_list]
 
-def direct_line(p1, p2): #x1 y1   x2 y2
-    dist = -((p1[1]-p2[1])/2)/(p2[0]-p1[0]+0.00001)
-    return f'{dist}*(abs(x - {p1[0]}) - abs(x - {p2[0]}))'.replace('- -', '+ ')
 
-# A function to collect the cords of the clicks 
-# + subsctract the offsets
-def collect_clicks(active_player_x):
-    print("Click wherever on the game screen")
+def direct_line(p1, p2):
+    x1, y1 = fmt_game(p1[0]), fmt_game(p1[1])
+    x2, y2 = fmt_game(p2[0]), fmt_game(p2[1])
+    dx = x2 - x1
+    if abs(dx) < 1e-12:
+        dx = fmt_game(vertical_eps(y1, y2)) if y1 != y2 else VERTICAL_MIN_EPS
+        x2 = fmt_game(x1 + dx)
+    dist = fmt_game(-((y1 - y2) / 2) / dx)
+    return f"{dist}*(abs(x - {x1}) - abs(x - {x2}))".replace("- -", "+ ")
+
+
+def process_clicks_to_waypoints(clicks):
+    """
+    Clicks in press order. First click = formula anchor (where the graph must
+    already be when the formula starts). Active player is NOT included.
+    """
+    if not clicks:
+        return []
+
+    waypoints = []
+    for field_x, field_y in clicks:
+        game_x, game_y = field_to_game(field_x, field_y)
+        if not waypoints:
+            waypoints.append([game_x, game_y])
+            continue
+
+        prev_x, prev_y = waypoints[-1]
+
+        if game_x < prev_x - CLICK_LEFT_TOLERANCE:
+            y_target = game_y
+            if abs(y_target - prev_y) < 1e-6:
+                print("Click left at same height — skipped.")
+                continue
+
+            direction = "up" if y_target > prev_y else "down"
+            eps = vertical_eps(prev_y, y_target)
+            end_x = fmt_game(prev_x + eps)
+            steepness = abs(y_target - prev_y) / (2 * eps)
+            print(
+                f"Click left of previous point -> vertical {direction} "
+                f"at x={prev_x:.4f}, y {prev_y:.4f} -> {y_target:.4f} "
+                f"(steepness~{steepness:.0f})"
+            )
+            waypoints.append([end_x, y_target])
+        else:
+            waypoints.append([game_x, game_y])
+
+    return waypoints
+
+
+def waypoints_to_formula(waypoints):
+    parts = []
+    for i in range(len(waypoints) - 1):
+        parts.append(direct_line(tuple(waypoints[i]), tuple(waypoints[i + 1])))
+    return " + ".join(parts).replace("+ -", "- ")
+
+
+def is_click_in_field(screen_x, screen_y):
+    """True if screen coordinates are inside the captured game field."""
+    return (
+        field["left"] <= screen_x < field["left"] + field["width"]
+        and field["top"] <= screen_y < field["top"] + field["height"]
+    )
+
+
+def collect_clicks():
+    print("Click on the game field (outside clicks ignored). F3 = start, F4 = done.")
+    if not refresh_field():
+        print("Graphwar window not found — cannot collect clicks.")
+        return []
+
     clicks = []
     while not is_key_pressed(clicks_start):
         pass
+
     while not is_key_pressed(clicks_end):
         if is_key_pressed(left_mouse_key):
-            (x, y) = win32gui.GetCursorPos()
-            if x < active_player_x:
-                x = active_player_x + 3
-                print(f"You have clicked to the left of your active player!\nThe x cordinate set to {x}: ({x}, {y - field['top']})")
-            else:
-                x -= field['left']
-            y -= field['top']
-            print((x, y))
-            clicks.append((x, y))
+            screen_x, screen_y = win32gui.GetCursorPos()
+            if not is_click_in_field(screen_x, screen_y):
+                print(f"Ignored click outside field: screen ({screen_x}, {screen_y})")
+                win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP, 0)
+                continue
+
+            field_x = screen_x - field["left"]
+            field_y = screen_y - field["top"]
+            print((field_x, field_y))
+            clicks.append((field_x, field_y))
             win32api.keybd_event(left_mouse_key, 0, win32con.KEYEVENTF_KEYUP, 0)
+
     return clicks
+
+
+def warn_no_players(context=""):
+    prefix = f"{context}: " if context else ""
+    print(
+        f"{prefix}No players detected.\n"
+        "  - Is Graphwar open and a round in progress?\n"
+        "  - Is the capture region correct? (preview_capture.py)\n"
+        "  - Tune detection (calibrate_players.py / calibrate_active.py)"
+    )
 
 # Prevents unnesessary clipboard copying
 def safe_copy(text, previous_text):
@@ -235,10 +343,16 @@ def safe_copy(text, previous_text):
         print("Safely copied!")
 
 def setup():
-    # I set the x position of the windown to -7 due to gap between the
-    # left border of the game window and left side of the screen 
-    move_window(game_window_name, window_start_cords[0], window_start_cords[1], 100, 100)
-    
+    global field
+
+    hwnd = find_game_window(game_window_name)
+    if hwnd is None:
+        safe_exit(1)
+
+    field = get_capture_field(hwnd, capture_margins)
+    print(f"Capture region: {field}")
+    print(f"Margins (client-relative): {capture_margins}")
+
     # Handling user mode input
     # 0 - usual detection
     # 1 - clicks
@@ -251,75 +365,119 @@ def setup():
         print("Incorrect input!\n")
     return mode
 
+def refresh_field():
+    global field
+
+    hwnd = find_game_window(game_window_name)
+    if hwnd is None:
+        return False
+
+    field = get_capture_field(hwnd, capture_margins)
+    return True
+
 def main():
     prev_text = ""
+    prev_summary = ""
     mss_ = mss.mss()
+    print("Auto mode: F2 = quit. Pathfinding: A*. Updates every ~1 s.")
     while not(is_key_pressed(exit_key)):
+        if not refresh_field():
+            print("Graphwar window not found. Waiting...")
+            sleep_key(0.5)
+            continue
+
         screenshot = np.array(mss_.grab(field))
         screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
+        screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
 
         if not mode:
-            # circles_cords = detect_black_circles(screenshot_r)
-            # if circles_cords is not None:
-            #     screenshot_r = draw_circles(circles_cords, screenshot_r)
-            #     # print(circles_cords)
-
             players_cords = detect_players(screenshot_r)
-            if players_cords is not None:
-                screenshot_r = draw_circles(players_cords, screenshot_r)
-                print(players_cords)
+            if players_cords is None:
+                warn_no_players("Auto mode")
+                cv2.imshow("GraphBot", screenshot_r)
+                cv2.waitKey(1)
+                sleep_key(0.5)
+                continue
+
+            obstacle_result = find_all_obstacles(screenshot_bgr, load_obstacles_params())
+            obstacles_field = obstacle_result["obstacles"]
+            obstacles_game = field_obstacles_to_game(obstacles_field, field["width"])
+
+            screenshot_vis = cv2.cvtColor(screenshot_r, cv2.COLOR_GRAY2BGR)
+            screenshot_vis = draw_circles(players_cords, screenshot_vis)
+            screenshot_vis = draw_obstacle_circles(screenshot_vis, obstacles_field)
 
             good_guys, bad_guys, active_player = separate(players_cords.tolist())
-            good_guys_norm = sorted(to_game_cords(good_guys), key= lambda x:x[0])
-            bad_guys_norm = sorted(to_game_cords(bad_guys), key= lambda x:x[0])
-            active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
+            if not bad_guys:
+                print("No enemies on the right side. Waiting...")
+                cv2.imshow("GraphBot", screenshot_vis)
+                cv2.waitKey(1)
+                sleep_key(0.5)
+                continue
 
-            print()
-            print("Players detected:", len(players_cords[0]))
-            print("Active player:", active_player)
-            print("Normalized:", active_norm)
-            print("Good guys:", good_guys)
-            print("Normalized:", good_guys_norm)
-            print("Bad guys:", bad_guys)
-            print("Normalized:", bad_guys_norm)
+            bad_guys_norm = sorted(to_game_cords(bad_guys), key=lambda x: x[0])
+            active_norm = field_to_game(active_player[0], active_player[1])
 
+            path_waypoints, hit_enemies, skipped_enemies = build_enemy_chain_astar(
+                bad_guys_norm,
+                obstacles_game,
+                clearance=DEFAULT_CLEARANCE,
+            )
 
-            print(bad_guys_norm[0])
-            print()
-            print()
-            a = [direct_line(active_norm, bad_guys_norm[0])]
+            if bad_guys_norm and astar_game(
+                active_norm, tuple(bad_guys_norm[0]), obstacles_game, clearance=DEFAULT_CLEARANCE
+            ) is None:
+                print("  note: active -> first formula point may need manual travel")
 
-            for i in range(1, len(bad_guys)):
-                a.append(direct_line(bad_guys_norm[i-1], bad_guys_norm[i]))
-            
-            formula = ' + '.join(a).replace('+ -', '- ')
-            print(formula)
-            safe_copy(formula, prev_text)
-            prev_text = formula
+            if len(path_waypoints) < 2 and bad_guys_norm:
+                print("  A* failed — fallback: straight chain from 1st enemy")
+                path_waypoints = [list(p) for p in bad_guys_norm]
 
-            cv2.imshow("GraphBot", screenshot_r)
+            screenshot_vis = draw_path_on_field(screenshot_vis, path_waypoints, field["width"])
+
+            summary = (
+                f"players={len(players_cords[0])}  obstacles={len(obstacles_field)}  "
+                f"enemies={len(hit_enemies)}/{len(bad_guys_norm)}  "
+                f"waypoints={len(path_waypoints)}  planner=A*"
+            )
+            if summary != prev_summary:
+                print(summary)
+                if skipped_enemies:
+                    print("  skipped (no detour):", skipped_enemies)
+                prev_summary = summary
+
+            formula = waypoints_to_formula(path_waypoints)
+            if not formula:
+                print("  no formula (need at least 2 waypoints)")
+            elif formula != prev_text:
+                print(formula)
+                safe_copy(formula, prev_text)
+                prev_text = formula
+
+            cv2.imshow("GraphBot", screenshot_vis)
             cv2.waitKey(1)
+            sleep_key(1.0)
         else:
             players_cords = detect_players(screenshot_r)
+            if players_cords is None:
+                warn_no_players("Click mode")
+                cv2.imshow("GraphBot", screenshot_r)
+                cv2.waitKey(1)
+                sleep_key(0.5)
+                continue
+
             _, _, active_player = separate(players_cords.tolist())
-            print("Active player:", active_player)
-            active_norm = (-25 + active_player[0]*50/field['width'], 15 - active_player[1]*50/field['width'])
-            print("Active player norm:", active_norm)
-            
-            clicks = collect_clicks(active_player[0])
-            print(clicks)
-            clicks_norm = sorted(to_game_cords(clicks), key= lambda x:x[0])
-            print(clicks_norm)
 
+            clicks = collect_clicks()
+            if not clicks:
+                print("No clicks recorded. Press F3 to start, F4 when done.")
+                continue
 
-            a = [direct_line(active_norm, clicks_norm[0])]
-            # print("HERE", a, active_norm, clicks_norm[0])
-
-            for i in range(1, len(clicks)):
-                a.append(direct_line(clicks_norm[i-1], clicks_norm[i]))
+            print("Clicks (field px):", clicks)
+            waypoints = process_clicks_to_waypoints(clicks)
+            print("Formula anchor + path:", waypoints)
+            formula = waypoints_to_formula(waypoints)
             print()
-
-            formula = ' + '.join(a).replace('+ -', '- ')
             print(formula)
             safe_copy(formula, prev_text)
             prev_text = formula
@@ -338,6 +496,8 @@ if __name__ == '__main__':
 
     window_start_cords = (-7, 0)
     game_window_name = 'Graphwar'
+    capture_margins = load_capture_margins()
+    field = None
     exit_codes = {
         0: "Program has successfuly finished!",
         1: "No window with the game name has found :(\nMake sure Graphwar is running"
@@ -345,12 +505,7 @@ if __name__ == '__main__':
 
     mode = setup()
 
-    field = {'left': 14,
-             'top': 52,
-             'width': 772,
-             'height': 452}
-    
     while not(is_key_pressed(start_key)):
         pass
-    
+
     main()

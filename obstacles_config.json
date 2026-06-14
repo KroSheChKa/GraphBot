@@ -1,0 +1,24 @@
+{
+  "obstacles": {
+    "detect_method": 0,
+    "black_gray_low": 0,
+    "black_gray_high": 0,
+    "black_blur": 29,
+    "hough_param1": 45,
+    "hough_param2": 22,
+    "hough_min_dist": 25,
+    "min_radius": 3,
+    "max_radius": 189,
+    "min_blob_area": 6,
+    "min_circularity": 22,
+    "blob_close": 2,
+    "suppress_nested": 1,
+    "inner_gray_max": 47,
+    "inner_edge_margin": 9,
+    "player_overlap_reject": 24,
+    "player_center_dist": 12,
+    "dedupe_center_dist": 4,
+    "dedupe_radius_diff": 3,
+    "use_player_filter": 1
+  }
+}

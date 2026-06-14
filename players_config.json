@@ -1,0 +1,14 @@
+{
+  "players": {
+    "player_gray_low": 50,
+    "player_gray_high": 250,
+    "player_gray_gap_low": 169,
+    "player_gray_gap_high": 171,
+    "player_blur": 23,
+    "hough_param1": 150,
+    "hough_param2": 10,
+    "hough_min_dist": 10,
+    "expected_radius": 8,
+    "radius_tolerance": 1
+  }
+}
