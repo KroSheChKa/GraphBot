@@ -11,7 +11,7 @@ import math
 
 import cv2
 
-from avoidance import DEFAULT_CLEARANCE, fmt_game, segment_intersects_circle
+from .avoidance import DEFAULT_CLEARANCE, fmt_game, segment_intersects_circle
 
 X_MIN, X_MAX = -25.0, 25.0
 Y_MIN, Y_MAX = -15.0, 15.0

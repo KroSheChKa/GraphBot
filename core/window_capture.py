@@ -8,7 +8,8 @@ from pathlib import Path
 import win32gui
 
 DEFAULT_GAME_WINDOW_NAME = "Graphwar"
-CONFIG_PATH = Path(__file__).resolve().parent / "capture_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = PROJECT_ROOT / "config" / "capture_config.json"
 
 DEFAULT_MARGINS = {
     "margin_left": 15,

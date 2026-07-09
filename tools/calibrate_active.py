@@ -2,8 +2,8 @@
 Calibrate active-player detection (red glow + player circle).
 
 Live capture from Graphwar, or a static screenshot:
-  python calibrate_active.py
-  python calibrate_active.py path/to/screenshot.png
+  python tools/calibrate_active.py
+  python tools/calibrate_active.py path/to/screenshot.png
 
 Controls:
   s        — save params to active_config.json
@@ -14,11 +14,15 @@ Controls:
 import sys
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import cv2
 import mss
 import numpy as np
 
-from detection import (
+from core.detection import (
     DEFAULT_ACTIVE_PARAMS,
     draw_detection_overlay,
     find_active_player,
@@ -27,7 +31,7 @@ from detection import (
     sanitize_active_params,
     save_active_params,
 )
-from window_capture import find_game_window, get_capture_field, load_capture_margins
+from core.window_capture import find_game_window, get_capture_field, load_capture_margins
 
 WINDOW = "GraphBot — active player"
 MASK_WINDOW = "red glow mask"

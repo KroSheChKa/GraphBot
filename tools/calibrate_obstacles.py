@@ -4,8 +4,8 @@ Calibrate black obstacle (sphere) detection.
 Black circles vary in size and can be nested. Player-sized dark blobs are
 filtered out using players_config.json + inner brightness check.
 
-  python calibrate_obstacles.py
-  python calibrate_obstacles.py path/to/screenshot.png
+  python tools/calibrate_obstacles.py
+  python tools/calibrate_obstacles.py path/to/screenshot.png
 
 Controls:
   s        — save to obstacles_config.json
@@ -19,11 +19,15 @@ Controls:
 import sys
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import cv2
 import mss
 import numpy as np
 
-from detection import (
+from core.detection import (
     DEFAULT_OBSTACLES_PARAMS,
     draw_obstacles_overlay,
     find_all_obstacles,
@@ -32,7 +36,7 @@ from detection import (
     sanitize_obstacles_params,
     save_obstacles_params,
 )
-from window_capture import find_game_window, get_capture_field, load_capture_margins
+from core.window_capture import find_game_window, get_capture_field, load_capture_margins
 
 WINDOW = "GraphBot — black obstacles"
 MASK_WINDOW = "obstacle hough mask"

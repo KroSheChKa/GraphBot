@@ -13,9 +13,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-ACTIVE_CONFIG_PATH = Path(__file__).resolve().parent / "active_config.json"
-PLAYERS_CONFIG_PATH = Path(__file__).resolve().parent / "players_config.json"
-OBSTACLES_CONFIG_PATH = Path(__file__).resolve().parent / "obstacles_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_DIR = PROJECT_ROOT / "config"
+ACTIVE_CONFIG_PATH = CONFIG_DIR / "active_config.json"
+PLAYERS_CONFIG_PATH = CONFIG_DIR / "players_config.json"
+OBSTACLES_CONFIG_PATH = CONFIG_DIR / "obstacles_config.json"
 
 DEFAULT_ACTIVE_PARAMS = {
     "red_excess_thresh": 18,

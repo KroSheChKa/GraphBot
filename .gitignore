@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Keep generated artifacts out of git.
+outputs/*
+!outputs/.gitkeep
