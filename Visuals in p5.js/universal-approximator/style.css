@@ -1,0 +1,141 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #1a1a1a;
+  color: #ccc;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  gap: 12px;
+}
+
+.workspace {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+canvas {
+  display: block;
+  border-radius: 4px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+.hint {
+  font-size: 13px;
+  opacity: 0.75;
+  text-align: center;
+  max-width: 900px;
+  line-height: 1.5;
+}
+
+#controls-panel {
+  width: 280px;
+  background: #242428;
+  border: 1px solid #3a3a44;
+  border-radius: 6px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+}
+
+#controls-panel h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #eee;
+}
+
+.control {
+  display: block;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: #bbb;
+}
+
+.control-head {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.control-value {
+  color: #9fd4ff;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.control input[type="range"] {
+  width: 100%;
+  accent-color: #3d7be0;
+}
+
+.control.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control.checkbox input {
+  width: 16px;
+  height: 16px;
+}
+
+#controls-panel button {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: #3d7be0;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#controls-panel button.secondary {
+  background: #444;
+}
+
+#controls-panel button:hover {
+  filter: brightness(1.08);
+}
+
+.status {
+  margin: 12px 0 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  color: #8fe6a8;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #777;
+}
+
+.legend {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #888;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 2px;
+  vertical-align: middle;
+}
+
+.swatch.target { background: #ff5a5a; }
+.swatch.approx { background: #50ff8c; }
+.swatch.sample { background: #64b4ff; }

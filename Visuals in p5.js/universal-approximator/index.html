@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Universal Approximator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="hint">
+        Нарисуй линию ЛКМ — сеть обучится автоматически. Подбери параметры ползунками справа.
+        C — очистить.
+      </p>
+      <div class="workspace">
+        <div id="canvas-container"></div>
+        <aside id="controls-panel"></aside>
+      </div>
+    </main>
+    <script src="network.js"></script>
+    <script src="sketch.js"></script>
+  </body>
+</html>
