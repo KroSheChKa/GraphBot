@@ -12,6 +12,7 @@ const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const DEFAULT_PARAMS = {
+  approxMethod: "sigmoid",
   sampleStep: 0.5,
   sigmoidK: 100,
   numNeurons: 50,
@@ -39,13 +40,20 @@ const COLORS = {
 
 let params = { ...DEFAULT_PARAMS };
 let drawnPoints = [];
+let mergedWaypoints = [];
+let linearWaypoints = [];
 let trainingData = [];
 let network = null;
+let linearMse = null;
 let approxXMin = null;
 let approxXMax = null;
 let isDrawing = false;
 let controlsEl;
 let statusMseEl;
+let copyBtnEl;
+let captureBtnEl;
+let bgImage = null;
+let isCapturing = false;
 
 function setup() {
   const cnv = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -55,7 +63,11 @@ function setup() {
 }
 
 function draw() {
-  background(...COLORS.background);
+  if (bgImage) {
+    image(bgImage, 0, 0, width, height);
+  } else {
+    background(...COLORS.background);
+  }
   drawGrid();
   drawAxes();
   drawCurve();
@@ -65,9 +77,9 @@ function draw() {
 }
 
 function buildControlsPanel() {
-  controlsEl.innerHTML = `
-    <h2>Параметры</h2>
-    ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
+  const sigmoidControls =
+    params.approxMethod === "sigmoid"
+      ? `
     ${controlSlider("sigmoidK", "k (крутизна σ)", 1, 300, 1, params.sigmoidK, 0)}
     ${controlSlider("numNeurons", "Нейронов (= ступенек)", 5, 150, 1, params.numNeurons, 0)}
     ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
@@ -76,12 +88,24 @@ function buildControlsPanel() {
     ${controlCheckbox("freezeX0", "Фиксировать x₀ (равном. шаг)", params.freezeX0)}
     ${controlCheckbox("showNeurons", "Показать линии x₀", params.showNeurons)}
     <button id="btn-retrain" type="button">Переобучить</button>
+    <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
+  `
+      : `
+    <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
+  `;
+
+  controlsEl.innerHTML = `
+    <h2>Параметры</h2>
+    <button id="btn-capture-field" type="button">Захват поля</button>
+    ${controlMethodPicker()}
+    ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
+    ${sigmoidControls}
+    <button id="btn-copy-formula" type="button" disabled>Копировать y</button>
     <button id="btn-reset" type="button" class="secondary">Сброс</button>
     <p id="status-mse" class="status">MSE: —</p>
-    <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
     <p class="legend">
       <span class="swatch target"></span> цель
-      <span class="swatch approx"></span> сеть
+      <span class="swatch approx"></span> аппроксимация
       <span class="swatch sample"></span> обучение
     </p>
   `;
@@ -91,10 +115,28 @@ function buildControlsPanel() {
     input.addEventListener("change", onParamChange);
   });
 
-  document.getElementById("btn-retrain").addEventListener("click", rerunPipeline);
+  const retrainBtn = document.getElementById("btn-retrain");
+  if (retrainBtn) {
+    retrainBtn.addEventListener("click", () => {
+      rerunPipeline();
+      logActiveFormula();
+    });
+  }
   document.getElementById("btn-reset").addEventListener("click", resetParams);
+  copyBtnEl = document.getElementById("btn-copy-formula");
+  copyBtnEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    copyActiveFormula();
+  });
+  captureBtnEl = document.getElementById("btn-capture-field");
+  captureBtnEl.addEventListener("click", (event) => {
+    event.preventDefault();
+    captureGameField();
+  });
   statusMseEl = document.getElementById("status-mse");
   syncSliderLabels();
+  updateCopyButton();
+  updateCaptureButton();
 }
 
 function controlSlider(key, label, min, max, step, value, decimals) {
@@ -126,6 +168,24 @@ function controlCheckbox(key, label, checked) {
   `;
 }
 
+function controlMethodPicker() {
+  return `
+    <div class="control method-picker">
+      <div class="control-head"><span>Метод аппроксимации</span></div>
+      <div class="method-options">
+        <label class="method-option">
+          <input type="radio" name="approxMethod" data-param="approxMethod" value="linear" ${params.approxMethod === "linear" ? "checked" : ""} />
+          <span>1. Линейный (сегменты)</span>
+        </label>
+        <label class="method-option">
+          <input type="radio" name="approxMethod" data-param="approxMethod" value="sigmoid" ${params.approxMethod === "sigmoid" ? "checked" : ""} />
+          <span>2. Сигмоиды (сеть)</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
 function formatParam(key, value, decimals) {
   if (key === "numNeurons" || key === "trainEpochs" || key === "sigmoidK") {
     return String(Math.round(value));
@@ -148,6 +208,8 @@ function readParamsFromUI() {
     const key = input.dataset.param;
     if (input.type === "checkbox") {
       params[key] = input.checked;
+    } else if (input.type === "radio") {
+      if (input.checked) params[key] = input.value;
     } else {
       params[key] = parseFloat(input.value);
     }
@@ -162,8 +224,21 @@ function onParamInput(event) {
   if (label) label.textContent = formatParam(key, parseFloat(input.value), decimals);
 }
 
-function onParamChange() {
+function onParamChange(event) {
+  const prevMethod = params.approxMethod;
   readParamsFromUI();
+  if (event?.target?.dataset?.param === "approxMethod" && params.approxMethod !== prevMethod) {
+    buildControlsPanel();
+    if (params.approxMethod === "sigmoid" && trainingData.length >= 2) {
+      trainSigmoidNetwork();
+    } else if (params.approxMethod === "linear") {
+      network = null;
+    }
+    updateStatusMse();
+    updateCopyButton();
+    logActiveFormula();
+    return;
+  }
   if (drawnPoints.length > 0) rerunPipeline();
 }
 
@@ -174,13 +249,16 @@ function resetParams() {
 }
 
 function drawGrid() {
+  const onField = bgImage !== null;
   strokeWeight(1);
   for (let x = X_MIN; x <= X_MAX; x++) {
-    stroke(...(x % 5 === 0 ? COLORS.gridMajor : COLORS.gridMinor));
+    const col = x % 5 === 0 ? COLORS.gridMajor : COLORS.gridMinor;
+    stroke(col[0], col[1], col[2], onField ? col[3] * 0.45 : col[3]);
     lineWorld(x, Y_MIN, x, Y_MAX);
   }
   for (let y = Y_MIN; y <= Y_MAX; y++) {
-    stroke(...(y % 5 === 0 ? COLORS.gridMajor : COLORS.gridMinor));
+    const col = y % 5 === 0 ? COLORS.gridMajor : COLORS.gridMinor;
+    stroke(col[0], col[1], col[2], onField ? col[3] * 0.45 : col[3]);
     lineWorld(X_MIN, y, X_MAX, y);
   }
 }
@@ -245,8 +323,27 @@ function drawSamplePoints() {
   }
 }
 
+function drawLinearSegments(weight, color) {
+  stroke(...color);
+  strokeWeight(weight);
+  for (let i = 0; i < linearWaypoints.length - 1; i++) {
+    const a = linearWaypoints[i];
+    const b = linearWaypoints[i + 1];
+    lineWorld(a.x, a.y, b.x, b.y);
+  }
+}
+
 function drawApproximation() {
-  if (!network || approxXMin === null || approxXMax === null) return;
+  if (approxXMin === null || approxXMax === null) return;
+  if (params.approxMethod === "sigmoid" && !network) return;
+  if (params.approxMethod === "linear" && linearWaypoints.length < 2) return;
+
+  if (params.approxMethod === "linear") {
+    drawLinearSegments(5, COLORS.approxGlow);
+    drawLinearSegments(2.5, COLORS.approx);
+    return;
+  }
+
   noFill();
   stroke(...COLORS.approxGlow);
   strokeWeight(5);
@@ -269,20 +366,32 @@ function drawApproximation() {
 }
 
 function drawNetworkOverlay() {
-  if (!network) return;
+  if (trainingData.length === 0) return;
+
   noStroke();
   fill(...COLORS.panelText);
   textSize(12);
   textAlign(LEFT, TOP);
-  const stepText =
-    network.x0Step !== null ? `  Δx₀=${roundCoord(network.x0Step)}` : "";
-  text(`k = ${params.sigmoidK}${stepText}`, 12, 12);
-  fill(...COLORS.approx);
-  text(`MSE = ${formatMse(network.mse)}`, 12, 28);
-  if (statusMseEl) {
-    statusMseEl.textContent = `MSE: ${formatMse(network.mse)}  |  точек: ${trainingData.length}  |  Δx₀: ${roundCoord(network.x0Step)}`;
+
+  const activeMse =
+    params.approxMethod === "linear" ? linearMse : network ? network.mse : null;
+  const methodLabel = params.approxMethod === "linear" ? "линейный" : "сигмоиды";
+
+  if (params.approxMethod === "sigmoid" && network) {
+    const stepText =
+      network.x0Step !== null ? `  Δx₀=${roundCoord(network.x0Step)}` : "";
+    text(`k = ${params.sigmoidK}${stepText}`, 12, 12);
+    fill(...COLORS.approx);
+    text(`MSE (${methodLabel}) = ${formatMse(activeMse)}`, 12, 28);
+  } else {
+    fill(...COLORS.approx);
+    text(`MSE (${methodLabel}) = ${formatMse(activeMse)}`, 12, 12);
+    text(`сегментов: ${linearWaypoints.length - 1}`, 12, 28);
   }
-  if (!params.showNeurons) return;
+
+  updateStatusMse();
+
+  if (params.approxMethod !== "sigmoid" || !network || !params.showNeurons) return;
   stroke(...COLORS.neuronLine);
   strokeWeight(1);
   drawingContext.setLineDash([4, 6]);
@@ -290,6 +399,22 @@ function drawNetworkOverlay() {
     lineWorld(x0, Y_MIN, x0, Y_MAX);
   }
   drawingContext.setLineDash([]);
+}
+
+function updateStatusMse() {
+  if (!statusMseEl) return;
+  if (trainingData.length === 0) {
+    statusMseEl.textContent = "MSE: —";
+    return;
+  }
+
+  const active =
+    params.approxMethod === "linear"
+      ? `активный: линейный ${formatMse(linearMse)}`
+      : `активный: сигмоиды ${formatMse(network?.mse)}`;
+  const compare = `сравнение — линейный: ${formatMse(linearMse)}  |  сигмоиды: ${formatMse(network?.mse)}`;
+  const meta = `точек обучения: ${trainingData.length}  |  сегментов: ${Math.max(0, linearWaypoints.length - 1)}`;
+  statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
 }
 
 function mergeByX(points) {
@@ -347,22 +472,151 @@ function resampleUniform(merged, step) {
   return samples;
 }
 
-function buildTrainingData(points) {
-  return resampleUniform(mergeByX(points), params.sampleStep);
+function evalDirectLineSegment(p1, p2, x) {
+  const x1 = p1.x;
+  const y1 = p1.y;
+  const x2 = p2.x;
+  const y2 = p2.y;
+  let dx = x2 - x1;
+  if (Math.abs(dx) < 1e-12) {
+    dx = y1 !== y2 ? 1e-6 : 1e-6;
+  }
+  const dist = -((y1 - y2) / 2) / dx;
+  return dist * (Math.abs(x - x1) - Math.abs(x - x2));
 }
 
-function trainNetwork() {
-  if (trainingData.length < 2) {
-    network = null;
-    approxXMin = null;
-    approxXMax = null;
-    if (statusMseEl) statusMseEl.textContent = "MSE: —";
-    return;
+function evalLinearWaypoints(waypoints, x) {
+  let y = 0;
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    y += evalDirectLineSegment(waypoints[i], waypoints[i + 1], x);
   }
+  return y;
+}
 
-  approxXMin = trainingData[0].x;
-  approxXMax = trainingData[trainingData.length - 1].x;
+function buildTrainingData(points) {
+  mergedWaypoints = mergeByX(points);
+  return resampleUniform(mergedWaypoints, params.sampleStep);
+}
 
+function syncLinearWaypointsFromDataset() {
+  linearWaypoints = trainingData.map((pt) => ({ x: pt.x, y: pt.y }));
+}
+
+function computeMseOnData(predictFn, data) {
+  if (data.length === 0) return null;
+  let sum = 0;
+  for (const pt of data) {
+    const pred = predictFn(pt.x);
+    if (!Number.isFinite(pred)) return null;
+    const err = pred - pt.y;
+    sum += err * err;
+  }
+  return sum / data.length;
+}
+
+function directLineFormula(p1, p2) {
+  const x1 = roundCoord(p1.x);
+  const y1 = roundCoord(p1.y);
+  const x2 = roundCoord(p2.x);
+  const y2 = roundCoord(p2.y);
+  let dx = x2 - x1;
+  if (Math.abs(dx) < 1e-12) {
+    dx = y1 !== y2 ? 1e-6 : 1e-6;
+  }
+  const dist = roundCoord(-((y1 - y2) / 2) / dx);
+  return `${dist}*(abs(x - ${x1}) - abs(x - ${x2}))`;
+}
+
+function linearFormulaText(waypoints) {
+  if (waypoints.length < 2) return null;
+  const parts = [];
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    parts.push(directLineFormula(waypoints[i], waypoints[i + 1]));
+  }
+  return `y=${parts.join("+")}`;
+}
+
+function getActiveFormulaText() {
+  if (trainingData.length < 2) return null;
+  let formula = null;
+  if (params.approxMethod === "linear") {
+    formula = linearFormulaText(linearWaypoints);
+  } else if (network) {
+    formula = network.toDesmosText();
+  }
+  return formula ? normalizeFormula(formula) : null;
+}
+
+function logActiveFormula() {
+  const formula = getActiveFormulaText();
+  if (!formula) return;
+  const label = params.approxMethod === "linear" ? "линейный" : "сигмоиды";
+  const mse =
+    params.approxMethod === "linear" ? formatMse(linearMse) : formatMse(network?.mse);
+  console.log(`[${label}] MSE = ${mse}`);
+  console.log(formula);
+}
+
+async function copyActiveFormula() {
+  const formula = getActiveFormulaText();
+  if (!formula || !copyBtnEl) return;
+  const prev = copyBtnEl.textContent;
+  try {
+    await navigator.clipboard.writeText(formula);
+    copyBtnEl.textContent = "Скопировано";
+  } catch {
+    copyBtnEl.textContent = "Ошибка";
+  }
+  setTimeout(() => {
+    if (copyBtnEl) copyBtnEl.textContent = prev;
+  }, 1200);
+}
+
+function updateCopyButton() {
+  if (!copyBtnEl) return;
+  copyBtnEl.disabled = getActiveFormulaText() === null;
+}
+
+function updateCaptureButton() {
+  if (!captureBtnEl) return;
+  captureBtnEl.disabled = isCapturing;
+  captureBtnEl.textContent = isCapturing ? "Захват..." : "Захват поля";
+}
+
+async function captureGameField() {
+  if (isCapturing) return;
+  isCapturing = true;
+  updateCaptureButton();
+
+  try {
+    const response = await fetch("/api/capture", { method: "POST" });
+    const data = await response.json();
+    if (!data.ok) {
+      alert(data.error || "Не удалось захватить поле");
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      loadImage(
+        data.image,
+        (img) => {
+          bgImage = img;
+          resolve();
+        },
+        (err) => reject(err)
+      );
+    });
+  } catch {
+    alert(
+      "Сервер захвата недоступен.\nЗапусти: python tools/approximator_server.py\nи открой http://127.0.0.1:8765/"
+    );
+  } finally {
+    isCapturing = false;
+    updateCaptureButton();
+  }
+}
+
+function trainSigmoidNetwork() {
   network = new SigmoidNetwork(params.numNeurons, params.sigmoidK);
   network.initFromData(trainingData, approxXMin, approxXMax, {
     stepHeights: params.stepHeights,
@@ -375,27 +629,48 @@ function trainNetwork() {
     params.trainLr,
     params.freezeX0
   );
+}
 
-  console.log(
-    `MSE = ${formatMse(network.mse)}  |  Δx₀ = ${roundCoord(network.x0Step)}  |  нейронов: ${params.numNeurons}`
-  );
-  console.log("Итоговая функция:");
-  console.log(network.toFormulaText());
-  console.log("σ(z) = 1 / (1 + exp(-z))");
+function processPipeline({ logFormula = false } = {}) {
+  if (drawnPoints.length === 0) return;
+
+  trainingData = buildTrainingData(drawnPoints);
+  if (trainingData.length < 2) {
+    network = null;
+    linearWaypoints = [];
+    linearMse = null;
+    approxXMin = null;
+    approxXMax = null;
+    if (statusMseEl) statusMseEl.textContent = "MSE: —";
+    updateCopyButton();
+    return;
+  }
+
+  syncLinearWaypointsFromDataset();
+  approxXMin = trainingData[0].x;
+  approxXMax = trainingData[trainingData.length - 1].x;
+  linearMse = computeMseOnData((x) => evalLinearWaypoints(linearWaypoints, x), trainingData);
+
+  if (params.approxMethod === "sigmoid") {
+    trainSigmoidNetwork();
+  } else {
+    network = null;
+  }
+
+  updateStatusMse();
+  updateCopyButton();
+  if (logFormula) logActiveFormula();
 }
 
 function rerunPipeline() {
   readParamsFromUI();
-  if (drawnPoints.length === 0) return;
-  trainingData = buildTrainingData(drawnPoints);
-  trainNetwork();
+  processPipeline();
 }
 
 function finishDrawing() {
   if (drawnPoints.length === 0) return;
   readParamsFromUI();
-  trainingData = buildTrainingData(drawnPoints);
-  trainNetwork();
+  processPipeline({ logFormula: true });
 }
 
 function formatMse(value) {
@@ -430,11 +705,15 @@ function mousePressed() {
   if (!mouseInsideCanvas()) return;
   isDrawing = true;
   drawnPoints = [];
+  mergedWaypoints = [];
+  linearWaypoints = [];
   trainingData = [];
   network = null;
+  linearMse = null;
   approxXMin = null;
   approxXMax = null;
   if (statusMseEl) statusMseEl.textContent = "MSE: —";
+  updateCopyButton();
   addPointAtMouse();
 }
 
@@ -464,11 +743,15 @@ function addPointAtMouse() {
 function keyPressed() {
   if (key === "c" || key === "C" || key === "с" || key === "С") {
     drawnPoints = [];
+    mergedWaypoints = [];
+    linearWaypoints = [];
     trainingData = [];
     network = null;
+    linearMse = null;
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";
+    updateCopyButton();
   }
 }
 

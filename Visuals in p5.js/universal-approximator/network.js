@@ -168,8 +168,36 @@ class SigmoidNetwork {
       parts.push(`${w}·σ(${this.k}·(x − ${x0}))`);
     }
 
-    return `y = ${parts.join(" + ").replace(/\+ -/g, "- ")}`;
+    return `y = ${parts.join(" + ")}`;
   }
+
+  toDesmosText(minWeight = 0.005) {
+    const bias = round3(this.bias);
+    const parts = [bias !== null ? `${bias}` : "0"];
+
+    for (let i = 0; i < this.numNeurons; i++) {
+      if (!Number.isFinite(this.w[i]) || Math.abs(this.w[i]) < minWeight) continue;
+      const w = round3(this.w[i]);
+      const x0 = round3(this.x0[i]);
+      if (w === null || x0 === null) continue;
+      parts.push(`${w}/(1+exp(-${this.k}*(x-${x0})))`);
+    }
+
+    return `y=${parts.join("+")}`;
+  }
+}
+
+function normalizeFormula(text) {
+  let s = String(text);
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/-\s*-/g, "+");
+    s = s.replace(/\+\s*\+/g, "+");
+    s = s.replace(/\+\s*-/g, "-");
+    s = s.replace(/-\s*\+/g, "-");
+  } while (s !== prev);
+  return s;
 }
 
 function clamp(value, min, max) {

@@ -70,6 +70,7 @@ import mss
 import sys, ctypes
 import time
 import random
+import re
 import numpy as np
 import win32api, win32con, win32gui
 import pyperclip
@@ -391,6 +392,20 @@ def collect_symbolic_scene(screenshot_bgr, players_params, active_params, obstac
     }
 
 
+def normalize_formula(text):
+    """Collapse - - / -- / + + to + and mixed signs (+-, -+) to -."""
+    s = str(text)
+    while True:
+        prev = s
+        s = re.sub(r"-\s*-", "+", s)
+        s = re.sub(r"\+\s*\+", "+", s)
+        s = re.sub(r"\+\s*-", "-", s)
+        s = re.sub(r"-\s*\+", "-", s)
+        if s == prev:
+            break
+    return s
+
+
 def direct_line(p1, p2):
     x1, y1 = fmt_game(p1[0]), fmt_game(p1[1])
     x2, y2 = fmt_game(p2[0]), fmt_game(p2[1])
@@ -399,7 +414,7 @@ def direct_line(p1, p2):
         dx = fmt_game(vertical_eps(y1, y2)) if y1 != y2 else VERTICAL_MIN_EPS
         x2 = fmt_game(x1 + dx)
     dist = fmt_game(-((y1 - y2) / 2) / dx)
-    return f"{dist}*(abs(x - {x1}) - abs(x - {x2}))".replace("- -", "+ ")
+    return f"{dist}*(abs(x - {x1}) - abs(x - {x2}))"
 
 
 def process_clicks_to_waypoints(clicks):
@@ -445,7 +460,7 @@ def waypoints_to_formula(waypoints):
     parts = []
     for i in range(len(waypoints) - 1):
         parts.append(direct_line(tuple(waypoints[i]), tuple(waypoints[i + 1])))
-    return " + ".join(parts).replace("+ -", "- ")
+    return normalize_formula(" + ".join(parts))
 
 
 def is_click_in_field(screen_x, screen_y):
