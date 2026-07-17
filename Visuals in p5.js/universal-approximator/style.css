@@ -80,6 +80,16 @@ canvas {
   accent-color: #3d7be0;
 }
 
+.control select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #3a3a44;
+  background: #1a1a1e;
+  color: #ddd;
+  font-size: 12px;
+}
+
 .control.checkbox {
   display: flex;
   align-items: center;

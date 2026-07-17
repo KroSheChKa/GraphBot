@@ -16,6 +16,12 @@ const DEFAULT_PARAMS = {
   sampleStep: 0.5,
   sigmoidK: 100,
   numNeurons: 50,
+  taylorOrder: 8,
+  taylorHiddenLayers: 2,
+  taylorHiddenSize: 16,
+  fourierHarmonics: 8,
+  fourierHiddenLayers: 2,
+  fourierHiddenSize: 16,
   trainEpochs: 500,
   trainLr: 0.02,
   showNeurons: true,
@@ -45,6 +51,9 @@ let linearWaypoints = [];
 let trainingData = [];
 let network = null;
 let linearMse = null;
+let sigmoidMse = null;
+let taylorMse = null;
+let fourierMse = null;
 let approxXMin = null;
 let approxXMax = null;
 let isDrawing = false;
@@ -76,10 +85,15 @@ function draw() {
   drawNetworkOverlay();
 }
 
+const FEATURE_MLP_ACTIVATION = "tanh";
+
 function buildControlsPanel() {
-  const sigmoidControls =
-    params.approxMethod === "sigmoid"
-      ? `
+  let methodControls = `
+    <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
+  `;
+
+  if (params.approxMethod === "sigmoid") {
+    methodControls = `
     ${controlSlider("sigmoidK", "k (крутизна σ)", 1, 300, 1, params.sigmoidK, 0)}
     ${controlSlider("numNeurons", "Нейронов (= ступенек)", 5, 150, 1, params.numNeurons, 0)}
     ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
@@ -89,17 +103,35 @@ function buildControlsPanel() {
     ${controlCheckbox("showNeurons", "Показать линии x₀", params.showNeurons)}
     <button id="btn-retrain" type="button">Переобучить</button>
     <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
-  `
-      : `
-    <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
   `;
+  } else if (params.approxMethod === "taylor") {
+    methodControls = `
+    ${controlSlider("taylorOrder", "Порядок n (вход φ)", 1, 20, 1, params.taylorOrder, 0)}
+    ${controlSlider("taylorHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.taylorHiddenLayers, 0)}
+    ${controlSlider("taylorHiddenSize", "Нейронов в слое", 2, 64, 1, params.taylorHiddenSize, 0)}
+    ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+    ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
+    <button id="btn-retrain" type="button">Переобучить</button>
+    <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = между φ и y стоит tanh.</p>
+  `;
+  } else if (params.approxMethod === "fourier") {
+    methodControls = `
+    ${controlSlider("fourierHarmonics", "Гармоник K", 1, 40, 1, params.fourierHarmonics, 0)}
+    ${controlSlider("fourierHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.fourierHiddenLayers, 0)}
+    ${controlSlider("fourierHiddenSize", "Нейронов в слое", 2, 64, 1, params.fourierHiddenSize, 0)}
+    ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+    ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
+    <button id="btn-retrain" type="button">Переобучить</button>
+    <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 слоёв = ряд Фурье.</p>
+  `;
+  }
 
   controlsEl.innerHTML = `
     <h2>Параметры</h2>
     <button id="btn-capture-field" type="button">Захват поля</button>
     ${controlMethodPicker()}
     ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
-    ${sigmoidControls}
+    ${methodControls}
     <button id="btn-copy-formula" type="button" disabled>Копировать y</button>
     <button id="btn-reset" type="button" class="secondary">Сброс</button>
     <p id="status-mse" class="status">MSE: —</p>
@@ -168,6 +200,21 @@ function controlCheckbox(key, label, checked) {
   `;
 }
 
+function controlSelect(key, label, options, value) {
+  const opts = options
+    .map(
+      (opt) =>
+        `<option value="${opt.value}" ${opt.value === value ? "selected" : ""}>${opt.label}</option>`
+    )
+    .join("");
+  return `
+    <label class="control">
+      <div class="control-head"><span>${label}</span></div>
+      <select data-param="${key}">${opts}</select>
+    </label>
+  `;
+}
+
 function controlMethodPicker() {
   return `
     <div class="control method-picker">
@@ -181,13 +228,31 @@ function controlMethodPicker() {
           <input type="radio" name="approxMethod" data-param="approxMethod" value="sigmoid" ${params.approxMethod === "sigmoid" ? "checked" : ""} />
           <span>2. Сигмоиды (сеть)</span>
         </label>
+        <label class="method-option">
+          <input type="radio" name="approxMethod" data-param="approxMethod" value="taylor" ${params.approxMethod === "taylor" ? "checked" : ""} />
+          <span>3. Тейлор (полином) (beta)</span>
+        </label>
+        <label class="method-option">
+          <input type="radio" name="approxMethod" data-param="approxMethod" value="fourier" ${params.approxMethod === "fourier" ? "checked" : ""} />
+          <span>4. Фурье (гармоники)</span>
+        </label>
       </div>
     </div>
   `;
 }
 
 function formatParam(key, value, decimals) {
-  if (key === "numNeurons" || key === "trainEpochs" || key === "sigmoidK") {
+  if (
+    key === "numNeurons" ||
+    key === "trainEpochs" ||
+    key === "sigmoidK" ||
+    key === "taylorOrder" ||
+    key === "taylorHiddenLayers" ||
+    key === "taylorHiddenSize" ||
+    key === "fourierHarmonics" ||
+    key === "fourierHiddenLayers" ||
+    key === "fourierHiddenSize"
+  ) {
     return String(Math.round(value));
   }
   return Number(value).toFixed(decimals ?? 2);
@@ -210,6 +275,8 @@ function readParamsFromUI() {
       params[key] = input.checked;
     } else if (input.type === "radio") {
       if (input.checked) params[key] = input.value;
+    } else if (input.tagName === "SELECT") {
+      params[key] = input.value;
     } else {
       params[key] = parseFloat(input.value);
     }
@@ -231,6 +298,10 @@ function onParamChange(event) {
     buildControlsPanel();
     if (params.approxMethod === "sigmoid" && trainingData.length >= 2) {
       trainSigmoidNetwork();
+    } else if (params.approxMethod === "taylor" && trainingData.length >= 2) {
+      trainTaylorNetwork();
+    } else if (params.approxMethod === "fourier" && trainingData.length >= 2) {
+      trainFourierNetwork();
     } else if (params.approxMethod === "linear") {
       network = null;
     }
@@ -333,9 +404,17 @@ function drawLinearSegments(weight, color) {
   }
 }
 
+function usesFeatureNetwork() {
+  return (
+    params.approxMethod === "sigmoid" ||
+    params.approxMethod === "taylor" ||
+    params.approxMethod === "fourier"
+  );
+}
+
 function drawApproximation() {
   if (approxXMin === null || approxXMax === null) return;
-  if (params.approxMethod === "sigmoid" && !network) return;
+  if (usesFeatureNetwork() && !network) return;
   if (params.approxMethod === "linear" && linearWaypoints.length < 2) return;
 
   if (params.approxMethod === "linear") {
@@ -375,17 +454,30 @@ function drawNetworkOverlay() {
 
   const activeMse =
     params.approxMethod === "linear" ? linearMse : network ? network.mse : null;
-  const methodLabel = params.approxMethod === "linear" ? "линейный" : "сигмоиды";
 
   if (params.approxMethod === "sigmoid" && network) {
     const stepText =
       network.x0Step !== null ? `  Δx₀=${roundCoord(network.x0Step)}` : "";
     text(`k = ${params.sigmoidK}${stepText}`, 12, 12);
     fill(...COLORS.approx);
-    text(`MSE (${methodLabel}) = ${formatMse(activeMse)}`, 12, 28);
+    text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 28);
+  } else if (params.approxMethod === "taylor" && network) {
+    const center = roundCoord(network.center);
+    const scale = roundCoord(network.scale);
+    text(`n=${params.taylorOrder}  L=${params.taylorHiddenLayers}×${params.taylorHiddenSize}`, 12, 12);
+    text(`c=${center}  s=${scale}`, 12, 28);
+    fill(...COLORS.approx);
+    text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 44);
+  } else if (params.approxMethod === "fourier" && network) {
+    const center = roundCoord(network.center);
+    const scale = roundCoord(network.scale);
+    text(`K=${params.fourierHarmonics}  L=${params.fourierHiddenLayers}×${params.fourierHiddenSize}`, 12, 12);
+    text(`c=${center}  s=${scale}`, 12, 28);
+    fill(...COLORS.approx);
+    text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 44);
   } else {
     fill(...COLORS.approx);
-    text(`MSE (${methodLabel}) = ${formatMse(activeMse)}`, 12, 12);
+    text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 12);
     text(`сегментов: ${linearWaypoints.length - 1}`, 12, 28);
   }
 
@@ -408,11 +500,12 @@ function updateStatusMse() {
     return;
   }
 
+  const activeMethodLabel = methodLabel();
   const active =
     params.approxMethod === "linear"
-      ? `активный: линейный ${formatMse(linearMse)}`
-      : `активный: сигмоиды ${formatMse(network?.mse)}`;
-  const compare = `сравнение — линейный: ${formatMse(linearMse)}  |  сигмоиды: ${formatMse(network?.mse)}`;
+      ? `активный: ${activeMethodLabel} ${formatMse(linearMse)}`
+      : `активный: ${activeMethodLabel} ${formatMse(network?.mse)}`;
+  const compare = `сравнение — линейный: ${formatMse(linearMse)}  |  сигмоиды: ${formatMse(sigmoidMse)}  |  Тейлор: ${formatMse(taylorMse)}  |  Фурье: ${formatMse(fourierMse)}`;
   const meta = `точек обучения: ${trainingData.length}  |  сегментов: ${Math.max(0, linearWaypoints.length - 1)}`;
   statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
 }
@@ -547,10 +640,23 @@ function getActiveFormulaText() {
   return formula ? normalizeFormula(formula) : null;
 }
 
+function methodLabel(method = params.approxMethod) {
+  if (method === "linear") return "линейный";
+  if (method === "taylor") return "Тейлор";
+  if (method === "fourier") return "Фурье";
+  return "сигмоиды";
+}
+
 function logActiveFormula() {
   const formula = getActiveFormulaText();
-  if (!formula) return;
-  const label = params.approxMethod === "linear" ? "линейный" : "сигмоиды";
+  if (!formula) {
+    if ((params.approxMethod === "taylor" || params.approxMethod === "fourier") && network) {
+      console.log(`[${methodLabel()}] MSE = ${formatMse(network.mse)}`);
+      console.log(network.architectureText());
+    }
+    return;
+  }
+  const label = methodLabel();
   const mse =
     params.approxMethod === "linear" ? formatMse(linearMse) : formatMse(network?.mse);
   console.log(`[${label}] MSE = ${mse}`);
@@ -629,6 +735,31 @@ function trainSigmoidNetwork() {
     params.trainLr,
     params.freezeX0
   );
+  sigmoidMse = network.mse;
+}
+
+function trainTaylorNetwork() {
+  network = new TaylorNetwork(
+    params.taylorOrder,
+    params.taylorHiddenLayers,
+    params.taylorHiddenSize,
+    FEATURE_MLP_ACTIVATION
+  );
+  network.initFromData(trainingData, approxXMin, approxXMax);
+  network.train(trainingData, params.trainEpochs, params.trainLr);
+  taylorMse = network.mse;
+}
+
+function trainFourierNetwork() {
+  network = new FourierNetwork(
+    params.fourierHarmonics,
+    params.fourierHiddenLayers,
+    params.fourierHiddenSize,
+    FEATURE_MLP_ACTIVATION
+  );
+  network.initFromData(trainingData, approxXMin, approxXMax);
+  network.train(trainingData, params.trainEpochs, params.trainLr);
+  fourierMse = network.mse;
 }
 
 function processPipeline({ logFormula = false } = {}) {
@@ -639,6 +770,9 @@ function processPipeline({ logFormula = false } = {}) {
     network = null;
     linearWaypoints = [];
     linearMse = null;
+    sigmoidMse = null;
+    taylorMse = null;
+    fourierMse = null;
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";
@@ -653,6 +787,10 @@ function processPipeline({ logFormula = false } = {}) {
 
   if (params.approxMethod === "sigmoid") {
     trainSigmoidNetwork();
+  } else if (params.approxMethod === "taylor") {
+    trainTaylorNetwork();
+  } else if (params.approxMethod === "fourier") {
+    trainFourierNetwork();
   } else {
     network = null;
   }
@@ -710,6 +848,9 @@ function mousePressed() {
   trainingData = [];
   network = null;
   linearMse = null;
+  sigmoidMse = null;
+  taylorMse = null;
+  fourierMse = null;
   approxXMin = null;
   approxXMax = null;
   if (statusMseEl) statusMseEl.textContent = "MSE: —";
@@ -748,6 +889,9 @@ function keyPressed() {
     trainingData = [];
     network = null;
     linearMse = null;
+    sigmoidMse = null;
+    taylorMse = null;
+    fourierMse = null;
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";
