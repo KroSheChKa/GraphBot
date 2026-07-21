@@ -149,7 +149,7 @@ function buildControlsPanel() {
   const modeSpecificControls =
     params.inputMode === "click"
       ? `
-    <p class="note">1-й клик — <strong>активный солдат</strong> (фиолетовая <strong>A</strong>). Дальше — цели в порядке кликов. Клик <strong>левее</strong> предыдущей точки → вертикальный сегмент. Формула без <code>y=</code>. ПКМ / Backspace — отменить.</p>
+    <p class="note">1-й клик — <strong>активный солдат</strong> (фиолетовая <strong>A</strong>). Дальше — цели в порядке кликов. Клик <strong>левее</strong> предыдущей точки → вертикальный сегмент. Формула без <code>y=</code>. <strong>Ctrl+Z</strong> / ПКМ / Backspace — отменить точку.</p>
     <button id="btn-undo-click" type="button" class="secondary">Отменить последний клик</button>
   `
       : `
@@ -1136,8 +1136,15 @@ function addPointAtMouse() {
   drawnPoints.push(w.copy());
 }
 
+function isUndoShortcut() {
+  if (!keyIsDown(CONTROL) && !keyIsDown(91)) return false;
+  // EN: Ctrl+Z · RU: Ctrl+Я (same physical key, keyCode 90)
+  if (keyCode === 90) return true;
+  return key === "z" || key === "Z" || key === "я" || key === "Я";
+}
+
 function keyPressed() {
-  if (params.inputMode === "click" && (keyCode === BACKSPACE || keyCode === DELETE)) {
+  if (params.inputMode === "click" && (keyCode === BACKSPACE || keyCode === DELETE || isUndoShortcut())) {
     undoLastClick();
     return false;
   }
