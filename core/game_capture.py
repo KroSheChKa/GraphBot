@@ -11,6 +11,7 @@ import numpy as np
 import win32con
 import win32gui
 
+from core.detection import find_active_player, load_active_params, load_players_params
 from core.window_capture import (
     DEFAULT_GAME_WINDOW_NAME,
     find_game_window,
@@ -20,6 +21,17 @@ from core.window_capture import (
 
 DEFAULT_WINDOW_POSITION = (-7, 0)
 SETTLE_SEC = 0.2
+GAME_PRECISION = 5
+
+
+def fmt_game(value):
+    return round(float(value), GAME_PRECISION)
+
+
+def field_to_game(field_x, field_y, field_width):
+    game_x = -25 + field_x * 50 / field_width
+    game_y = 15 - field_y * 50 / field_width
+    return fmt_game(game_x), fmt_game(game_y)
 
 
 def focus_game_window(hwnd):
@@ -104,10 +116,25 @@ def capture_game_field(
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)}
 
+    active_result = find_active_player(
+        bgr,
+        field["width"],
+        active_params=load_active_params(),
+        players_params=load_players_params(),
+    )
+    active_norm = None
+    active_circle = active_result.get("active")
+    if active_circle is not None:
+        cx, cy, _radius = active_circle
+        gx, gy = field_to_game(cx, cy, field["width"])
+        active_norm = [gx, gy]
+
     return {
         "ok": True,
         "image": image,
         "width": field["width"],
         "height": field["height"],
         "field": field,
+        "active_norm": active_norm,
+        "active_method": active_result.get("method"),
     }

@@ -7,11 +7,16 @@ const Y_MAX = 15;
 const ASPECT = 5 / 3;
 const MERGE_X_EPS = 0.05;
 const CURVE_STEP = 0.15;
+const GAME_PRECISION = 5;
+const CLICK_LEFT_TOLERANCE = 0.08;
+const VERTICAL_MAX_COEFF = 999;
+const VERTICAL_MIN_EPS = 0.001;
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const DEFAULT_PARAMS = {
+  inputMode: "click",
   approxMethod: "sigmoid",
   sampleStep: 0.5,
   sigmoidK: 100,
@@ -38,6 +43,10 @@ const COLORS = {
   curve: [255, 90, 90],
   curveGlow: [255, 90, 90, 40],
   sample: [100, 180, 255],
+  click: [255, 176, 80],
+  clickGlow: [255, 176, 80, 50],
+  anchor: [180, 140, 255],
+  anchorGlow: [180, 140, 255, 55],
   approx: [80, 255, 140],
   approxGlow: [80, 255, 140, 35],
   panelText: [210, 210, 220],
@@ -45,6 +54,8 @@ const COLORS = {
 };
 
 let params = { ...DEFAULT_PARAMS };
+let clickPoints = [];
+let clickWaypoints = [];
 let drawnPoints = [];
 let mergedWaypoints = [];
 let linearWaypoints = [];
@@ -66,6 +77,7 @@ let isCapturing = false;
 
 function setup() {
   const cnv = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+  cnv.elt.oncontextmenu = () => false;
   document.getElementById("canvas-container").appendChild(cnv.elt);
   controlsEl = document.getElementById("controls-panel");
   buildControlsPanel();
@@ -79,67 +91,101 @@ function draw() {
   }
   drawGrid();
   drawAxes();
-  drawCurve();
-  drawSamplePoints();
-  drawApproximation();
-  drawNetworkOverlay();
+  if (params.inputMode === "click") {
+    drawClickMode();
+  } else {
+    drawCurve();
+    drawSamplePoints();
+    drawApproximation();
+    drawNetworkOverlay();
+  }
 }
 
 const FEATURE_MLP_ACTIVATION = "tanh";
 
 function buildControlsPanel() {
-  let methodControls = `
-    <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
-  `;
+  let drawMethodControls = "";
 
-  if (params.approxMethod === "sigmoid") {
-    methodControls = `
-    ${controlSlider("sigmoidK", "k (крутизна σ)", 1, 300, 1, params.sigmoidK, 0)}
-    ${controlSlider("numNeurons", "Нейронов (= ступенек)", 5, 150, 1, params.numNeurons, 0)}
-    ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
-    ${controlSlider("trainLr", "Learning rate", 0.01, 0.2, 0.01, params.trainLr, 2)}
-    ${controlCheckbox("stepHeights", "Высота w из линии", params.stepHeights)}
-    ${controlCheckbox("freezeX0", "Фиксировать x₀ (равном. шаг)", params.freezeX0)}
-    ${controlCheckbox("showNeurons", "Показать линии x₀", params.showNeurons)}
-    <button id="btn-retrain" type="button">Переобучить</button>
-    <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
-  `;
-  } else if (params.approxMethod === "taylor") {
-    methodControls = `
-    ${controlSlider("taylorOrder", "Порядок n (вход φ)", 1, 20, 1, params.taylorOrder, 0)}
-    ${controlSlider("taylorHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.taylorHiddenLayers, 0)}
-    ${controlSlider("taylorHiddenSize", "Нейронов в слое", 2, 64, 1, params.taylorHiddenSize, 0)}
-    ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
-    ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
-    <button id="btn-retrain" type="button">Переобучить</button>
-    <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = между φ и y стоит tanh.</p>
-  `;
-  } else if (params.approxMethod === "fourier") {
-    methodControls = `
-    ${controlSlider("fourierHarmonics", "Гармоник K", 1, 40, 1, params.fourierHarmonics, 0)}
-    ${controlSlider("fourierHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.fourierHiddenLayers, 0)}
-    ${controlSlider("fourierHiddenSize", "Нейронов в слое", 2, 64, 1, params.fourierHiddenSize, 0)}
-    ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
-    ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
-    <button id="btn-retrain" type="button">Переобучить</button>
-    <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 слоёв = ряд Фурье.</p>
-  `;
+  if (params.inputMode === "draw") {
+    if (params.approxMethod === "linear") {
+      drawMethodControls = `
+        <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
+      `;
+    } else if (params.approxMethod === "sigmoid") {
+      drawMethodControls = `
+      ${controlSlider("sigmoidK", "k (крутизна σ)", 1, 300, 1, params.sigmoidK, 0)}
+      ${controlSlider("numNeurons", "Нейронов (= ступенек)", 5, 150, 1, params.numNeurons, 0)}
+      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("trainLr", "Learning rate", 0.01, 0.2, 0.01, params.trainLr, 2)}
+      ${controlCheckbox("stepHeights", "Высота w из линии", params.stepHeights)}
+      ${controlCheckbox("freezeX0", "Фиксировать x₀ (равном. шаг)", params.freezeX0)}
+      ${controlCheckbox("showNeurons", "Показать линии x₀", params.showNeurons)}
+      <button id="btn-retrain" type="button">Переобучить</button>
+      <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
+    `;
+    } else if (params.approxMethod === "taylor") {
+      drawMethodControls = `
+      ${controlSlider("taylorOrder", "Порядок n (вход φ)", 1, 20, 1, params.taylorOrder, 0)}
+      ${controlSlider("taylorHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.taylorHiddenLayers, 0)}
+      ${controlSlider("taylorHiddenSize", "Нейронов в слое", 2, 64, 1, params.taylorHiddenSize, 0)}
+      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
+      <button id="btn-retrain" type="button">Переобучить</button>
+      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = между φ и y стоит tanh.</p>
+    `;
+    } else if (params.approxMethod === "fourier") {
+      drawMethodControls = `
+      ${controlSlider("fourierHarmonics", "Гармоник K", 1, 40, 1, params.fourierHarmonics, 0)}
+      ${controlSlider("fourierHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.fourierHiddenLayers, 0)}
+      ${controlSlider("fourierHiddenSize", "Нейронов в слое", 2, 64, 1, params.fourierHiddenSize, 0)}
+      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
+      <button id="btn-retrain" type="button">Переобучить</button>
+      <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 слоёв = ряд Фурье.</p>
+    `;
+    }
   }
 
-  controlsEl.innerHTML = `
-    <h2>Параметры</h2>
-    <button id="btn-capture-field" type="button">Захват поля</button>
-    ${controlMethodPicker()}
-    ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
-    ${methodControls}
-    <button id="btn-copy-formula" type="button" disabled>Копировать y</button>
-    <button id="btn-reset" type="button" class="secondary">Сброс</button>
-    <p id="status-mse" class="status">MSE: —</p>
+  const modeSpecificControls =
+    params.inputMode === "click"
+      ? `
+    <p class="note">1-й клик — <strong>активный солдат</strong> (фиолетовая <strong>A</strong>). Дальше — цели в порядке кликов. Клик <strong>левее</strong> предыдущей точки → вертикальный сегмент. Формула без <code>y=</code>. ПКМ / Backspace — отменить.</p>
+    <button id="btn-undo-click" type="button" class="secondary">Отменить последний клик</button>
+  `
+      : `
+    <div class="draw-mode-section">
+      ${controlDrawMethodPicker()}
+      ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
+      ${drawMethodControls}
+    </div>
+  `;
+
+  const legendHtml =
+    params.inputMode === "click"
+      ? `
+    <p class="legend">
+      <span class="swatch anchor"></span> активный (A)
+      <span class="swatch click"></span> цели
+      <span class="swatch approx"></span> сегменты
+    </p>
+  `
+      : `
     <p class="legend">
       <span class="swatch target"></span> цель
       <span class="swatch approx"></span> аппроксимация
       <span class="swatch sample"></span> обучение
     </p>
+  `;
+
+  controlsEl.innerHTML = `
+    <h2>Параметры</h2>
+    <button id="btn-capture-field" type="button">Захват поля</button>
+    ${controlInputModePicker()}
+    ${modeSpecificControls}
+    <button id="btn-copy-formula" type="button" disabled>Копировать y</button>
+    <button id="btn-reset" type="button" class="secondary">Сброс</button>
+    <p id="status-mse" class="status">—</p>
+    ${legendHtml}
   `;
 
   controlsEl.querySelectorAll("[data-param]").forEach((input) => {
@@ -153,6 +199,10 @@ function buildControlsPanel() {
       rerunPipeline();
       logActiveFormula();
     });
+  }
+  const undoClickBtn = document.getElementById("btn-undo-click");
+  if (undoClickBtn) {
+    undoClickBtn.addEventListener("click", () => undoLastClick());
   }
   document.getElementById("btn-reset").addEventListener("click", resetParams);
   copyBtnEl = document.getElementById("btn-copy-formula");
@@ -169,6 +219,25 @@ function buildControlsPanel() {
   syncSliderLabels();
   updateCopyButton();
   updateCaptureButton();
+  updateStatusPanel();
+}
+
+function controlInputModePicker() {
+  return `
+    <div class="control mode-picker">
+      <div class="control-head"><span>Режим</span></div>
+      <div class="mode-options">
+        <label class="mode-option">
+          <input type="radio" name="inputMode" data-param="inputMode" value="click" ${params.inputMode === "click" ? "checked" : ""} />
+          <span>1. Click mode</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="inputMode" data-param="inputMode" value="draw" ${params.inputMode === "draw" ? "checked" : ""} />
+          <span>2. Draw mode</span>
+        </label>
+      </div>
+    </div>
+  `;
 }
 
 function controlSlider(key, label, min, max, step, value, decimals) {
@@ -215,26 +284,26 @@ function controlSelect(key, label, options, value) {
   `;
 }
 
-function controlMethodPicker() {
+function controlDrawMethodPicker() {
   return `
-    <div class="control method-picker">
+    <div class="control method-picker nested">
       <div class="control-head"><span>Метод аппроксимации</span></div>
       <div class="method-options">
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="linear" ${params.approxMethod === "linear" ? "checked" : ""} />
-          <span>1. Линейный (сегменты)</span>
+          <span>2.1 Линейный (сегменты)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="sigmoid" ${params.approxMethod === "sigmoid" ? "checked" : ""} />
-          <span>2. Сигмоиды (сеть)</span>
+          <span>2.2 Сигмоиды (сеть)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="taylor" ${params.approxMethod === "taylor" ? "checked" : ""} />
-          <span>3. Тейлор (полином) (beta)</span>
+          <span>2.3 Тейлор (полином) (beta)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="fourier" ${params.approxMethod === "fourier" ? "checked" : ""} />
-          <span>4. Фурье (гармоники)</span>
+          <span>2.4 Фурье (гармоники)</span>
         </label>
       </div>
     </div>
@@ -292,8 +361,18 @@ function onParamInput(event) {
 }
 
 function onParamChange(event) {
+  const prevInputMode = params.inputMode;
   const prevMethod = params.approxMethod;
   readParamsFromUI();
+
+  if (event?.target?.dataset?.param === "inputMode" && params.inputMode !== prevInputMode) {
+    clearWorkspaceState();
+    buildControlsPanel();
+    return;
+  }
+
+  if (params.inputMode !== "draw") return;
+
   if (event?.target?.dataset?.param === "approxMethod" && params.approxMethod !== prevMethod) {
     buildControlsPanel();
     if (params.approxMethod === "sigmoid" && trainingData.length >= 2) {
@@ -305,7 +384,7 @@ function onParamChange(event) {
     } else if (params.approxMethod === "linear") {
       network = null;
     }
-    updateStatusMse();
+    updateStatusPanel();
     updateCopyButton();
     logActiveFormula();
     return;
@@ -315,8 +394,9 @@ function onParamChange(event) {
 
 function resetParams() {
   params = { ...DEFAULT_PARAMS };
+  clearWorkspaceState();
   buildControlsPanel();
-  if (drawnPoints.length > 0) rerunPipeline();
+  if (params.inputMode === "draw" && drawnPoints.length > 0) rerunPipeline();
 }
 
 function drawGrid() {
@@ -444,8 +524,50 @@ function drawApproximation() {
   endShape();
 }
 
+function drawClickMode() {
+  if (clickWaypoints.length >= 2) {
+    const prevLinear = linearWaypoints;
+    linearWaypoints = clickWaypoints;
+    drawLinearSegments(5, COLORS.approxGlow);
+    drawLinearSegments(2.5, COLORS.approx);
+    linearWaypoints = prevLinear;
+  }
+
+  if (clickPoints.length === 0) {
+    drawClickModeHint();
+    return;
+  }
+
+  noStroke();
+  textSize(11);
+  textAlign(CENTER, CENTER);
+  for (let i = 0; i < clickPoints.length; i++) {
+    const pt = clickPoints[i];
+    const s = worldToScreen(pt.x, pt.y);
+    const isAnchor = i === 0;
+    fill(...(isAnchor ? COLORS.anchorGlow : COLORS.clickGlow));
+    circle(s.x, s.y, isAnchor ? 20 : 18);
+    fill(...(isAnchor ? COLORS.anchor : COLORS.click));
+    circle(s.x, s.y, isAnchor ? 11 : 10);
+    fill(20, 20, 24);
+    text(isAnchor ? "A" : String(i), s.x, s.y);
+  }
+}
+
+function drawClickModeHint() {
+  noStroke();
+  fill(...COLORS.panelText);
+  textSize(13);
+  textAlign(CENTER, TOP);
+  const cx = width / 2;
+  text("1-й клик — активный солдат (A)", cx, 14);
+  textSize(11);
+  fill(...COLORS.axisLabel);
+  text("Дальше кликай цели; клик левее → вертикальный сегмент", cx, 34);
+}
+
 function drawNetworkOverlay() {
-  if (trainingData.length === 0) return;
+  if (params.inputMode !== "draw" || trainingData.length === 0) return;
 
   noStroke();
   fill(...COLORS.panelText);
@@ -481,7 +603,7 @@ function drawNetworkOverlay() {
     text(`сегментов: ${linearWaypoints.length - 1}`, 12, 28);
   }
 
-  updateStatusMse();
+  updateStatusPanel();
 
   if (params.approxMethod !== "sigmoid" || !network || !params.showNeurons) return;
   stroke(...COLORS.neuronLine);
@@ -491,6 +613,19 @@ function drawNetworkOverlay() {
     lineWorld(x0, Y_MIN, x0, Y_MAX);
   }
   drawingContext.setLineDash([]);
+}
+
+function updateStatusPanel() {
+  if (!statusMseEl) return;
+
+  if (params.inputMode === "click") {
+    const segments = Math.max(0, clickWaypoints.length - 1);
+    const targets = Math.max(0, clickPoints.length - 1);
+    statusMseEl.textContent = `активный (A): ${clickPoints.length > 0 ? "да" : "нет"}  |  целей: ${targets}  |  сегментов: ${segments}`;
+    return;
+  }
+
+  updateStatusMse();
 }
 
 function updateStatusMse() {
@@ -508,6 +643,86 @@ function updateStatusMse() {
   const compare = `сравнение — линейный: ${formatMse(linearMse)}  |  сигмоиды: ${formatMse(sigmoidMse)}  |  Тейлор: ${formatMse(taylorMse)}  |  Фурье: ${formatMse(fourierMse)}`;
   const meta = `точек обучения: ${trainingData.length}  |  сегментов: ${Math.max(0, linearWaypoints.length - 1)}`;
   statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
+}
+
+function fmtGame(value) {
+  const factor = 10 ** GAME_PRECISION;
+  return Math.round(Number(value) * factor) / factor;
+}
+
+function verticalEps(yFrom, yTo, maxCoeff = VERTICAL_MAX_COEFF) {
+  const dy = Math.abs(yTo - yFrom);
+  if (dy < 1e-9) return VERTICAL_MIN_EPS;
+  return Math.max(VERTICAL_MIN_EPS, dy / (2 * maxCoeff));
+}
+
+function buildClickFormulaWaypoints() {
+  if (clickPoints.length < 2) return [];
+
+  const waypoints = [];
+  for (const pt of clickPoints) {
+    const gameX = fmtGame(pt.x);
+    const gameY = fmtGame(pt.y);
+
+    if (waypoints.length === 0) {
+      waypoints.push({ x: gameX, y: gameY });
+      continue;
+    }
+
+    const prev = waypoints[waypoints.length - 1];
+    if (gameX < prev.x - CLICK_LEFT_TOLERANCE) {
+      if (Math.abs(gameY - prev.y) < 1e-6) continue;
+      const eps = verticalEps(prev.y, gameY);
+      waypoints.push({ x: fmtGame(prev.x + eps), y: gameY });
+    } else {
+      waypoints.push({ x: gameX, y: gameY });
+    }
+  }
+
+  return waypoints.length >= 2 ? waypoints : [];
+}
+
+function syncClickWaypoints() {
+  clickWaypoints = buildClickFormulaWaypoints();
+}
+
+function addClickPointAtMouse() {
+  const w = screenToWorld(mouseX, mouseY);
+  w.x = constrain(w.x, X_MIN, X_MAX);
+  w.y = constrain(w.y, Y_MIN, Y_MAX);
+  clickPoints.push({ x: w.x, y: w.y });
+  syncClickWaypoints();
+  updateStatusPanel();
+  updateCopyButton();
+  logActiveFormula();
+}
+
+function undoLastClick() {
+  if (clickPoints.length === 0) return;
+  clickPoints.pop();
+  syncClickWaypoints();
+  updateStatusPanel();
+  updateCopyButton();
+  logActiveFormula();
+}
+
+function clearWorkspaceState() {
+  clickPoints = [];
+  clickWaypoints = [];
+  drawnPoints = [];
+  mergedWaypoints = [];
+  linearWaypoints = [];
+  trainingData = [];
+  network = null;
+  linearMse = null;
+  sigmoidMse = null;
+  taylorMse = null;
+  fourierMse = null;
+  approxXMin = null;
+  approxXMax = null;
+  isDrawing = false;
+  updateStatusPanel();
+  updateCopyButton();
 }
 
 function mergeByX(points) {
@@ -607,29 +822,44 @@ function computeMseOnData(predictFn, data) {
   return sum / data.length;
 }
 
-function directLineFormula(p1, p2) {
-  const x1 = roundCoord(p1.x);
-  const y1 = roundCoord(p1.y);
-  const x2 = roundCoord(p2.x);
-  const y2 = roundCoord(p2.y);
+function directLineFormula(p1, p2, useGamePrecision = false) {
+  const round = useGamePrecision ? fmtGame : roundCoord;
+  const x1 = round(p1.x);
+  const y1 = round(p1.y);
+  const x2 = round(p2.x);
+  const y2 = round(p2.y);
   let dx = x2 - x1;
   if (Math.abs(dx) < 1e-12) {
-    dx = y1 !== y2 ? 1e-6 : 1e-6;
+    dx = y1 !== y2 ? verticalEps(y1, y2) : VERTICAL_MIN_EPS;
   }
-  const dist = roundCoord(-((y1 - y2) / 2) / dx);
+  const dist = round(-((y1 - y2) / 2) / dx);
   return `${dist}*(abs(x - ${x1}) - abs(x - ${x2}))`;
 }
 
-function linearFormulaText(waypoints) {
+function waypointsFormulaText(waypoints, useGamePrecision = false, includeYPrefix = true) {
   if (waypoints.length < 2) return null;
   const parts = [];
   for (let i = 0; i < waypoints.length - 1; i++) {
-    parts.push(directLineFormula(waypoints[i], waypoints[i + 1]));
+    parts.push(directLineFormula(waypoints[i], waypoints[i + 1], useGamePrecision));
   }
-  return `y=${parts.join("+")}`;
+  const body = normalizeFormula(parts.join(" + "));
+  return includeYPrefix ? `y=${body.replace(/^y=/, "")}` : body;
+}
+
+function linearFormulaText(waypoints, useGamePrecision = false) {
+  return waypointsFormulaText(waypoints, useGamePrecision, true);
+}
+
+function clickFormulaText(waypoints) {
+  return waypointsFormulaText(waypoints, true, false);
 }
 
 function getActiveFormulaText() {
+  if (params.inputMode === "click") {
+    if (clickWaypoints.length < 2) return null;
+    return clickFormulaText(clickWaypoints);
+  }
+
   if (trainingData.length < 2) return null;
   let formula = null;
   if (params.approxMethod === "linear") {
@@ -650,16 +880,26 @@ function methodLabel(method = params.approxMethod) {
 function logActiveFormula() {
   const formula = getActiveFormulaText();
   if (!formula) {
-    if ((params.approxMethod === "taylor" || params.approxMethod === "fourier") && network) {
+    if (
+      params.inputMode === "draw" &&
+      (params.approxMethod === "taylor" || params.approxMethod === "fourier") &&
+      network
+    ) {
       console.log(`[${methodLabel()}] MSE = ${formatMse(network.mse)}`);
       console.log(network.architectureText());
     }
     return;
   }
-  const label = methodLabel();
+  const label = params.inputMode === "click" ? "click mode" : methodLabel();
   const mse =
-    params.approxMethod === "linear" ? formatMse(linearMse) : formatMse(network?.mse);
-  console.log(`[${label}] MSE = ${mse}`);
+    params.inputMode === "click" || params.approxMethod === "linear"
+      ? formatMse(linearMse)
+      : formatMse(network?.mse);
+  if (params.inputMode === "click") {
+    console.log(`[${label}] сегментов: ${Math.max(0, clickWaypoints.length - 1)}`);
+  } else {
+    console.log(`[${label}] MSE = ${mse}`);
+  }
   console.log(formula);
 }
 
@@ -712,6 +952,8 @@ async function captureGameField() {
         (err) => reject(err)
       );
     });
+
+    clearWorkspaceState();
   } catch {
     alert(
       "Сервер захвата недоступен.\nЗапусти: python tools/approximator_server.py\nи открой http://127.0.0.1:8765/"
@@ -763,7 +1005,7 @@ function trainFourierNetwork() {
 }
 
 function processPipeline({ logFormula = false } = {}) {
-  if (drawnPoints.length === 0) return;
+  if (params.inputMode !== "draw" || drawnPoints.length === 0) return;
 
   trainingData = buildTrainingData(drawnPoints);
   if (trainingData.length < 2) {
@@ -841,6 +1083,18 @@ function lineWorld(x1, y1, x2, y2) {
 
 function mousePressed() {
   if (!mouseInsideCanvas()) return;
+
+  if (params.inputMode === "click") {
+    if (mouseButton === RIGHT) {
+      undoLastClick();
+      return false;
+    }
+    if (mouseButton === LEFT) {
+      addClickPointAtMouse();
+    }
+    return;
+  }
+
   isDrawing = true;
   drawnPoints = [];
   mergedWaypoints = [];
@@ -859,11 +1113,12 @@ function mousePressed() {
 }
 
 function mouseDragged() {
-  if (!isDrawing || !mouseInsideCanvas()) return;
+  if (params.inputMode !== "draw" || !isDrawing || !mouseInsideCanvas()) return;
   addPointAtMouse();
 }
 
 function mouseReleased() {
+  if (params.inputMode !== "draw") return;
   isDrawing = false;
   if (drawnPoints.length > 0) finishDrawing();
 }
@@ -882,7 +1137,17 @@ function addPointAtMouse() {
 }
 
 function keyPressed() {
+  if (params.inputMode === "click" && (keyCode === BACKSPACE || keyCode === DELETE)) {
+    undoLastClick();
+    return false;
+  }
+
   if (key === "c" || key === "C" || key === "с" || key === "С") {
+    if (params.inputMode === "click") {
+      clearWorkspaceState();
+      updateStatusPanel();
+      return false;
+    }
     drawnPoints = [];
     mergedWaypoints = [];
     linearWaypoints = [];

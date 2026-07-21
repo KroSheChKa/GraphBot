@@ -165,13 +165,17 @@ canvas {
 .swatch.target { background: #ff5a5a; }
 .swatch.approx { background: #50ff8c; }
 .swatch.sample { background: #64b4ff; }
+.swatch.click { background: #ffb050; }
+.swatch.anchor { background: #b48cff; }
 
+.mode-picker .mode-options,
 .method-picker .method-options {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.mode-option,
 .method-option {
   display: flex;
   align-items: center;
@@ -179,8 +183,21 @@ canvas {
   cursor: pointer;
 }
 
+.mode-option input,
 .method-option input {
   width: 16px;
   height: 16px;
   accent-color: #3d7be0;
+}
+
+.draw-mode-section {
+  margin-top: 4px;
+  padding: 10px 10px 2px;
+  border-left: 2px solid #3d7be0;
+  background: rgba(61, 123, 224, 0.06);
+  border-radius: 0 4px 4px 0;
+}
+
+.method-picker.nested {
+  margin-bottom: 0;
 }

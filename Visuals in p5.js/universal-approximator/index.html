@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <title>Universal Approximator</title>
+    <title>GraphBot Formula Builder</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
     <link rel="stylesheet" type="text/css" href="style.css" />
   </head>
@@ -10,8 +10,9 @@
     <main>
       <p class="hint">
         Запусти <code>python tools/approximator_server.py</code> и открой
-        <code>http://127.0.0.1:8765/</code>. «Захват поля» — скриншот Graphwar под рисование.
-        C — очистить линию (фон остаётся).
+        <code>http://127.0.0.1:8765/</code>.
+        По умолчанию — <strong>Click mode</strong>: 1-й клик — активный солдат (<strong>A</strong>, фиолетовый), дальше цели.
+        Формула без <code>y=</code>. В <strong>Draw mode</strong> — рисование и 4 метода аппроксимации. «Захват поля» — скриншот Graphwar. C — очистить путь (фон остаётся).
       </p>
       <div class="workspace">
         <div id="canvas-container"></div>

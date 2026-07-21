@@ -929,10 +929,43 @@ def main():
                 print("No clicks recorded. Press F3 to start, F4 when done.")
                 continue
 
+            if not refresh_field():
+                print("Graphwar window not found — cannot build formula.")
+                continue
+
+            screenshot = np.array(mss_.grab(field))
+            screenshot_r = cv2.cvtColor(screenshot, cv2.COLOR_RGB2GRAY)
+            screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+
+            scene = collect_symbolic_scene(
+                screenshot_bgr,
+                players_params=players_params,
+                active_params=active_params,
+                obstacles_params=obstacles_params,
+            )
+            active_norm = scene["active_norm"]
+            if active_norm is None:
+                print(
+                    "Click mode: active player not detected "
+                    f"(method={scene['active_result']['method']}). "
+                    "Tune tools/calibrate_active.py"
+                )
+                continue
+
+            clicks_norm = sorted(
+                [list(field_to_game(field_x, field_y)) for field_x, field_y in clicks],
+                key=lambda point: point[0],
+            )
+            waypoints = [list(active_norm)] + clicks_norm
+
             print("Clicks (field px):", clicks)
-            waypoints = process_clicks_to_waypoints(clicks)
-            print("Formula anchor + path:", waypoints)
+            print("Active (game):", active_norm)
+            print("Targets sorted by x:", clicks_norm)
+            print("Waypoints:", waypoints)
             formula = waypoints_to_formula(waypoints)
+            if not formula:
+                print("No formula (need at least one target click).")
+                continue
             print()
             print(formula)
             safe_copy(formula, prev_text)
