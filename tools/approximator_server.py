@@ -89,7 +89,7 @@ def main():
 
     httpd = ThreadingHTTPServer((HOST, PORT), ApproximatorHandler)
     print(f"Approximator server: http://{HOST}:{PORT}/")
-    print("Graphwar must be running. Use «Захват поля» in the UI.")
+    print("Graphwar must be running. Use «Capture field» in the UI.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

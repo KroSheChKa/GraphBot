@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <title>GraphBot Formula Builder</title>
@@ -9,10 +9,11 @@
   <body>
     <main>
       <p class="hint">
-        Запусти <code>python tools/approximator_server.py</code> и открой
+        Run <code>python tools/approximator_server.py</code> and open
         <code>http://127.0.0.1:8765/</code>.
-        По умолчанию — <strong>Click mode</strong>: 1-й клик — активный солдат (<strong>A</strong>, фиолетовый), дальше цели.
-        Формула без <code>y=</code>. В <strong>Draw mode</strong> — рисование и 4 метода аппроксимации. «Захват поля» — скриншот Graphwar. C — очистить путь (фон остаётся).
+        Default is <strong>Click mode</strong>: 1st click — active soldier (<strong>A</strong>, purple), then targets.
+        Formula has no <code>y=</code> prefix. In <strong>Draw mode</strong> — sketch a curve and pick one of 4 approximation methods.
+        <strong>Capture field</strong> grabs a Graphwar screenshot. <strong>C</strong> clears the path (background stays).
       </p>
       <div class="workspace">
         <div id="canvas-container"></div>

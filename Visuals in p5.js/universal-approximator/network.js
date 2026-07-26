@@ -420,7 +420,7 @@ class FeatureMlpNetwork {
   architectureText() {
     const hidden = this.numHiddenLayers > 0
       ? `${this.numHiddenLayers}×${this.hiddenSize} (${this.activation})`
-      : "линейный на φ";
+      : "linear on φ";
     return `${this.networkName()}: φ∈R^${this.inputSize()} → ${hidden} → 1`;
   }
 

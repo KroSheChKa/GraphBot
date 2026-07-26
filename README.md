@@ -107,12 +107,12 @@ Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
 
 | Action | Control |
 |--------|---------|
-| Capture Graphwar field as background | **Захват поля** (Graphwar must be running; window moved to corner for alignment) |
+| Capture Graphwar field as background | **Capture field** (Graphwar must be running; window moved to corner for alignment) |
 | Clear current path / stroke | **C** *(background screenshot stays)* |
-| Copy formula | **Копировать y** |
-| Reset sliders & canvas state | **Сброс** |
+| Copy formula | **Copy y** |
+| Reset sliders & canvas state | **Reset** |
 
-**After «Захват поля»:** any previous clicks or drawn curve are cleared automatically — you start fresh on the new screenshot.
+**After «Capture field»:** any previous clicks or drawn curve are cleared automatically — you start fresh on the new screenshot.
 
 ### Click mode (web UI)
 
@@ -120,7 +120,7 @@ Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
 |--------|---------|
 | Place active soldier | **1st click** — purple marker **A** |
 | Place targets | **2nd, 3rd… clicks** — orange markers **2**, **3**… |
-| Undo last click | **Right-click**, **Backspace**, or **Отменить последний клик** |
+| Undo last click | **Right-click**, **Backspace**, or **Undo last click** |
 
 Formula output: **expression only, no `y=` prefix** — paste into Graphwar as-is.
 
@@ -138,9 +138,9 @@ Switch to **2. Draw mode** in the side panel, then pick an approximation method:
 | Action | Control |
 |--------|---------|
 | Draw target curve | Click and drag on the canvas |
-| Adjust dataset density | **Шаг датасета** slider |
-| Hidden-layer activation (Taylor / Fourier) | **Активация скрытых слоёв** — only when hidden layers ≥ 1 |
-| Retrain after parameter change | **Переобучить** |
+| Adjust dataset density | **Dataset step** slider |
+| Hidden-layer activation (Taylor / Fourier) | **Hidden-layer activation** — only when hidden layers ≥ 1 |
+| Retrain after parameter change | **Retrain** |
 
 Formula output: **`y=...`** (Graphwar syntax). Compare MSE in the status line before copying.
 
@@ -220,11 +220,11 @@ $$
 
 ### Web UI *(recommended)*
 
-1. Run [the web UI](#web-ui-recommended), optionally **Захват поля**.
+1. Run [the web UI](#web-ui-recommended), optionally **Capture field**.
 2. **1st click** — your active soldier (purple **A**). You choose the position manually on the screenshot.
 3. **Next clicks** — targets (enemies, detour points) in **click order**.
 4. If a click lands **left of the previous waypoint** → vertical segment is inserted automatically.
-5. **Копировать y** — copies the expression **without `y=`**, e.g.:
+5. **Copy y** — copies the expression **without `y=`**, e.g.:
 
 ```
 -1.2*(abs(x - -18.5) - abs(x - -5.2)) + 0.8*(abs(x - -5.2) - abs(x - 12.1))
@@ -394,7 +394,7 @@ $$
 
 ### Activation functions (Taylor / Fourier MLP)
 
-When **Taylor** or **Fourier** uses **≥ 1 hidden layer**, the web UI trains a small MLP on feature vector $\varphi(t)$. Choose the nonlinearity in **Активация скрытых слоёв** (disabled at 0 hidden layers — then the model is purely linear on $\varphi$).
+When **Taylor** or **Fourier** uses **≥ 1 hidden layer**, the web UI trains a small MLP on feature vector $\varphi(t)$. Choose the nonlinearity in **Hidden-layer activation** (disabled at 0 hidden layers — then the model is purely linear on $\varphi$).
 
 | Activation | Notes |
 |------------|--------|
@@ -490,7 +490,7 @@ GraphBot/
 │   └── universal-approximator/  # Web UI (p5.js + in-browser training)
 ├── docs/images/             # README screenshots (add yours here)
 ├── GAME_RULES.md            # Graphwar rules reference
-├── TODO.md                  # Detailed dev notes (Russian)
+├── TODO.md                  # Detailed dev notes
 └── outputs/                 # Local logs / temp artifacts (gitignored)
 ```
 

@@ -1,31 +1,26 @@
 """
-Локальная песочница для тестовых мини-скриптов.
+Local sandbox for small test scripts.
 
-Используй этот файл для быстрых экспериментов, чтобы не засорять корень проекта.
-Результаты складывай в ../outputs.
+Use this file for quick experiments so the project root stays clean.
+Save results under ../outputs.
 """
 
-from pathlib import Path
+from __future__ import annotations
+
 import json
-from datetime import datetime
+from pathlib import Path
+
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-OUTPUTS_DIR = ROOT_DIR / "outputs"
-
-
-def write_sample_output() -> Path:
-    """Пример: сохранить тестовый JSON в outputs."""
-    OUTPUTS_DIR.mkdir(exist_ok=True)
-    payload = {
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "note": "sandbox test output",
-    }
-    out_path = OUTPUTS_DIR / "sandbox_sample.json"
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return out_path
+def save_sample_json(name: str = "sample.json") -> Path:
+    """Example: write a test JSON file to outputs."""
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUTPUT_DIR / name
+    path.write_text(json.dumps({"ok": True, "source": "sandbox/tester_programs.py"}, indent=2), encoding="utf-8")
+    return path
 
 
 if __name__ == "__main__":
-    saved = write_sample_output()
-    print(f"Saved test file: {saved}")
+    out = save_sample_json()
+    print(f"Wrote {out}")

@@ -117,10 +117,10 @@ function controlActivationSelect() {
   const disabled = mlpHiddenLayerCount() <= 0;
   return controlSelect(
     "mlpActivation",
-    "Активация скрытых слоёв",
+    "Hidden-layer activation",
     MLP_ACTIVATION_OPTIONS,
     params.mlpActivation ?? "tanh",
-    { disabled, title: disabled ? "Нужен хотя бы один скрытый слой" : "" }
+    { disabled, title: disabled ? "Requires at least one hidden layer" : "" }
   );
 }
 
@@ -136,41 +136,41 @@ function buildControlsPanel() {
   if (params.inputMode === "draw") {
     if (params.approxMethod === "linear") {
       drawMethodControls = `
-        <p class="note">Прямые между синими точками датасета. Число сегментов задаётся шагом датасета.</p>
+        <p class="note">Straight lines between blue dataset points. Segment count follows the dataset step.</p>
       `;
     } else if (params.approxMethod === "sigmoid") {
       drawMethodControls = `
-      ${controlSlider("sigmoidK", "k (крутизна σ)", 1, 300, 1, params.sigmoidK, 0)}
-      ${controlSlider("numNeurons", "Нейронов (= ступенек)", 5, 150, 1, params.numNeurons, 0)}
-      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("sigmoidK", "k (sigmoid steepness σ)", 1, 300, 1, params.sigmoidK, 0)}
+      ${controlSlider("numNeurons", "Neurons (= steps)", 5, 150, 1, params.numNeurons, 0)}
+      ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.01, 0.2, 0.01, params.trainLr, 2)}
-      ${controlCheckbox("stepHeights", "Высота w из линии", params.stepHeights)}
-      ${controlCheckbox("freezeX0", "Фиксировать x₀ (равном. шаг)", params.freezeX0)}
-      ${controlCheckbox("showNeurons", "Показать линии x₀", params.showNeurons)}
-      <button id="btn-retrain" type="button">Переобучить</button>
-      <p class="note">x₀ равномерно по x. w[i] = скачок высоты линии на x₀[i]. k — резкость скачка.</p>
+      ${controlCheckbox("stepHeights", "Initialize w from line", params.stepHeights)}
+      ${controlCheckbox("freezeX0", "Freeze x₀ (uniform spacing)", params.freezeX0)}
+      ${controlCheckbox("showNeurons", "Show x₀ lines", params.showNeurons)}
+      <button id="btn-retrain" type="button">Retrain</button>
+      <p class="note">Uniform x₀ along x. w[i] = height jump of the line at x₀[i]. k controls step sharpness.</p>
     `;
     } else if (params.approxMethod === "taylor") {
       drawMethodControls = `
-      ${controlSlider("taylorOrder", "Порядок n (вход φ)", 1, 20, 1, params.taylorOrder, 0)}
-      ${controlSlider("taylorHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.taylorHiddenLayers, 0)}
-      ${controlSlider("taylorHiddenSize", "Нейронов в слое", 2, 64, 1, params.taylorHiddenSize, 0)}
+      ${controlSlider("taylorOrder", "Order n (φ input)", 1, 20, 1, params.taylorOrder, 0)}
+      ${controlSlider("taylorHiddenLayers", "Hidden layers", 0, 4, 1, params.taylorHiddenLayers, 0)}
+      ${controlSlider("taylorHiddenSize", "Neurons per layer", 2, 64, 1, params.taylorHiddenSize, 0)}
       ${controlActivationSelect()}
-      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
-      <button id="btn-retrain" type="button">Переобучить</button>
-      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = нелинейная активация между φ и y.</p>
+      <button id="btn-retrain" type="button">Retrain</button>
+      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 hidden layers = pure polynomial; &gt;0 = nonlinear activation between φ and y.</p>
     `;
     } else if (params.approxMethod === "fourier") {
       drawMethodControls = `
-      ${controlSlider("fourierHarmonics", "Гармоник K", 1, 40, 1, params.fourierHarmonics, 0)}
-      ${controlSlider("fourierHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.fourierHiddenLayers, 0)}
-      ${controlSlider("fourierHiddenSize", "Нейронов в слое", 2, 64, 1, params.fourierHiddenSize, 0)}
+      ${controlSlider("fourierHarmonics", "Harmonics K", 1, 40, 1, params.fourierHarmonics, 0)}
+      ${controlSlider("fourierHiddenLayers", "Hidden layers", 0, 4, 1, params.fourierHiddenLayers, 0)}
+      ${controlSlider("fourierHiddenSize", "Neurons per layer", 2, 64, 1, params.fourierHiddenSize, 0)}
       ${controlActivationSelect()}
-      ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
+      ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
-      <button id="btn-retrain" type="button">Переобучить</button>
-      <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 слоёв = ряд Фурье.</p>
+      <button id="btn-retrain" type="button">Retrain</button>
+      <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 layers = Fourier series.</p>
     `;
     }
   }
@@ -178,13 +178,13 @@ function buildControlsPanel() {
   const modeSpecificControls =
     params.inputMode === "click"
       ? `
-    <p class="note">1-й клик — <strong>активный солдат</strong> (фиолетовая <strong>A</strong>). Дальше — цели в порядке кликов. Клик <strong>левее</strong> предыдущей точки → вертикальный сегмент. Формула без <code>y=</code>. <strong>Ctrl+Z</strong> / ПКМ / Backspace — отменить точку.</p>
-    <button id="btn-undo-click" type="button" class="secondary">Отменить последний клик</button>
+    <p class="note">1st click — <strong>active soldier</strong> (purple <strong>A</strong>). Then place targets in click order. Click <strong>left</strong> of the previous point → vertical segment. Formula has no <code>y=</code> prefix. <strong>Ctrl+Z</strong> / right-click / Backspace — undo last point.</p>
+    <button id="btn-undo-click" type="button" class="secondary">Undo last click</button>
   `
       : `
     <div class="draw-mode-section">
       ${controlDrawMethodPicker()}
-      ${controlSlider("sampleStep", "Шаг датасета", 0.1, 2, 0.05, params.sampleStep, 2)}
+      ${controlSlider("sampleStep", "Dataset step", 0.1, 2, 0.05, params.sampleStep, 2)}
       ${drawMethodControls}
     </div>
   `;
@@ -193,26 +193,26 @@ function buildControlsPanel() {
     params.inputMode === "click"
       ? `
     <p class="legend">
-      <span class="swatch anchor"></span> активный (A)
-      <span class="swatch click"></span> цели
-      <span class="swatch approx"></span> сегменты
+      <span class="swatch anchor"></span> active (A)
+      <span class="swatch click"></span> targets
+      <span class="swatch approx"></span> segments
     </p>
   `
       : `
     <p class="legend">
-      <span class="swatch target"></span> цель
-      <span class="swatch approx"></span> аппроксимация
-      <span class="swatch sample"></span> обучение
+      <span class="swatch target"></span> target curve
+      <span class="swatch approx"></span> approximation
+      <span class="swatch sample"></span> training
     </p>
   `;
 
   controlsEl.innerHTML = `
-    <h2>Параметры</h2>
-    <button id="btn-capture-field" type="button">Захват поля</button>
+    <h2>Parameters</h2>
+    <button id="btn-capture-field" type="button">Capture field</button>
     ${controlInputModePicker()}
     ${modeSpecificControls}
-    <button id="btn-copy-formula" type="button" disabled>Копировать y</button>
-    <button id="btn-reset" type="button" class="secondary">Сброс</button>
+    <button id="btn-copy-formula" type="button" disabled>Copy y</button>
+    <button id="btn-reset" type="button" class="secondary">Reset</button>
     <p id="status-mse" class="status">—</p>
     ${legendHtml}
   `;
@@ -264,7 +264,7 @@ function buildControlsPanel() {
 function controlInputModePicker() {
   return `
     <div class="control mode-picker">
-      <div class="control-head"><span>Режим</span></div>
+      <div class="control-head"><span>Mode</span></div>
       <div class="mode-options">
         <label class="mode-option">
           <input type="radio" name="inputMode" data-param="inputMode" value="click" ${params.inputMode === "click" ? "checked" : ""} />
@@ -328,23 +328,23 @@ function controlSelect(key, label, options, value, { disabled = false, title = "
 function controlDrawMethodPicker() {
   return `
     <div class="control method-picker nested">
-      <div class="control-head"><span>Метод аппроксимации</span></div>
+      <div class="control-head"><span>Approximation method</span></div>
       <div class="method-options">
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="linear" ${params.approxMethod === "linear" ? "checked" : ""} />
-          <span>2.1 Линейный (сегменты)</span>
+          <span>2.1 Linear (segments)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="sigmoid" ${params.approxMethod === "sigmoid" ? "checked" : ""} />
-          <span>2.2 Сигмоиды (сеть)</span>
+          <span>2.2 Sigmoid network</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="taylor" ${params.approxMethod === "taylor" ? "checked" : ""} />
-          <span>2.3 Тейлор (полином) (beta)</span>
+          <span>2.3 Taylor (polynomial) (beta)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="fourier" ${params.approxMethod === "fourier" ? "checked" : ""} />
-          <span>2.4 Фурье (гармоники)</span>
+          <span>2.4 Fourier (harmonics)</span>
         </label>
       </div>
     </div>
@@ -459,7 +459,7 @@ function syncActivationSelectState() {
   if (!select) return;
   const enabled = mlpHiddenLayerCount() > 0;
   select.disabled = !enabled;
-  select.title = enabled ? "" : "Нужен хотя бы один скрытый слой";
+  select.title = enabled ? "" : "Requires at least one hidden layer";
 }
 
 function resetParams() {
@@ -630,10 +630,10 @@ function drawClickModeHint() {
   textSize(13);
   textAlign(CENTER, TOP);
   const cx = width / 2;
-  text("1-й клик — активный солдат (A)", cx, 14);
+  text("1st click — active soldier (A)", cx, 14);
   textSize(11);
   fill(...COLORS.axisLabel);
-  text("Дальше кликай цели; клик левее → вертикальный сегмент", cx, 34);
+  text("Then click targets; click left of previous → vertical segment", cx, 34);
 }
 
 function drawNetworkOverlay() {
@@ -672,7 +672,7 @@ function drawNetworkOverlay() {
   } else {
     fill(...COLORS.approx);
     text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 12);
-    text(`сегментов: ${linearWaypoints.length - 1}`, 12, 28);
+    text(`segments: ${linearWaypoints.length - 1}`, 12, 28);
   }
 
   updateStatusPanel();
@@ -693,7 +693,7 @@ function updateStatusPanel() {
   if (params.inputMode === "click") {
     const segments = Math.max(0, clickWaypoints.length - 1);
     const targets = Math.max(0, clickPoints.length - 1);
-    statusMseEl.textContent = `активный (A): ${clickPoints.length > 0 ? "да" : "нет"}  |  целей: ${targets}  |  сегментов: ${segments}`;
+    statusMseEl.textContent = `active (A): ${clickPoints.length > 0 ? "yes" : "no"}  |  targets: ${targets}  |  segments: ${segments}`;
     return;
   }
 
@@ -710,10 +710,10 @@ function updateStatusMse() {
   const activeMethodLabel = methodLabel();
   const active =
     params.approxMethod === "linear"
-      ? `активный: ${activeMethodLabel} ${formatMse(linearMse)}`
-      : `активный: ${activeMethodLabel} ${formatMse(network?.mse)}`;
-  const compare = `сравнение — линейный: ${formatMse(linearMse)}  |  сигмоиды: ${formatMse(sigmoidMse)}  |  Тейлор: ${formatMse(taylorMse)}  |  Фурье: ${formatMse(fourierMse)}`;
-  const meta = `точек обучения: ${trainingData.length}  |  сегментов: ${Math.max(0, linearWaypoints.length - 1)}`;
+      ? `active: ${activeMethodLabel} ${formatMse(linearMse)}`
+      : `active: ${activeMethodLabel} ${formatMse(network?.mse)}`;
+  const compare = `compare — linear: ${formatMse(linearMse)}  |  sigmoid: ${formatMse(sigmoidMse)}  |  Taylor: ${formatMse(taylorMse)}  |  Fourier: ${formatMse(fourierMse)}`;
+  const meta = `training points: ${trainingData.length}  |  segments: ${Math.max(0, linearWaypoints.length - 1)}`;
   statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
 }
 
@@ -943,10 +943,10 @@ function getActiveFormulaText() {
 }
 
 function methodLabel(method = params.approxMethod) {
-  if (method === "linear") return "линейный";
-  if (method === "taylor") return "Тейлор";
-  if (method === "fourier") return "Фурье";
-  return "сигмоиды";
+  if (method === "linear") return "linear";
+  if (method === "taylor") return "Taylor";
+  if (method === "fourier") return "Fourier";
+  return "sigmoid";
 }
 
 function logActiveFormula() {
@@ -968,7 +968,7 @@ function logActiveFormula() {
       ? formatMse(linearMse)
       : formatMse(network?.mse);
   if (params.inputMode === "click") {
-    console.log(`[${label}] сегментов: ${Math.max(0, clickWaypoints.length - 1)}`);
+    console.log(`[${label}] segments: ${Math.max(0, clickWaypoints.length - 1)}`);
   } else {
     console.log(`[${label}] MSE = ${mse}`);
   }
@@ -981,9 +981,9 @@ async function copyActiveFormula() {
   const prev = copyBtnEl.textContent;
   try {
     await navigator.clipboard.writeText(formula);
-    copyBtnEl.textContent = "Скопировано";
+    copyBtnEl.textContent = "Copied";
   } catch {
-    copyBtnEl.textContent = "Ошибка";
+    copyBtnEl.textContent = "Error";
   }
   setTimeout(() => {
     if (copyBtnEl) copyBtnEl.textContent = prev;
@@ -998,7 +998,7 @@ function updateCopyButton() {
 function updateCaptureButton() {
   if (!captureBtnEl) return;
   captureBtnEl.disabled = isCapturing;
-  captureBtnEl.textContent = isCapturing ? "Захват..." : "Захват поля";
+  captureBtnEl.textContent = isCapturing ? "Capturing..." : "Capture field";
 }
 
 async function captureGameField() {
@@ -1010,7 +1010,7 @@ async function captureGameField() {
     const response = await fetch("/api/capture", { method: "POST" });
     const data = await response.json();
     if (!data.ok) {
-      alert(data.error || "Не удалось захватить поле");
+      alert(data.error || "Failed to capture field");
       return;
     }
 
@@ -1028,7 +1028,7 @@ async function captureGameField() {
     clearWorkspaceState();
   } catch {
     alert(
-      "Сервер захвата недоступен.\nЗапусти: python tools/approximator_server.py\nи открой http://127.0.0.1:8765/"
+      "Capture server unavailable.\nRun: python tools/approximator_server.py\nThen open http://127.0.0.1:8765/"
     );
   } finally {
     isCapturing = false;
@@ -1212,7 +1212,7 @@ function addPointAtMouse() {
 
 function isUndoShortcut() {
   if (!keyIsDown(CONTROL) && !keyIsDown(91)) return false;
-  // EN: Ctrl+Z · RU: Ctrl+Я (same physical key, keyCode 90)
+  // EN: Ctrl+Z · RU keyboard: Ctrl+Я (same physical key, keyCode 90)
   if (keyCode === 90) return true;
   return key === "z" || key === "Z" || key === "я" || key === "Я";
 }

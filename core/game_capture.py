@@ -94,7 +94,7 @@ def capture_game_field(
     """
     hwnd = find_game_window(window_title)
     if hwnd is None:
-        return {"ok": False, "error": f"Окно «{window_title}» не найдено"}
+        return {"ok": False, "error": f"Window «{window_title}» not found"}
 
     focus_game_window(hwnd)
     if settle_sec > 0:

@@ -1,190 +1,190 @@
 # GraphBot — TODO
 
-План доработок. Выполняем по одному пункту, не всё сразу.
+Development plan. Tackle one item at a time, not everything at once.
 
 ---
 
-## 1. Обход тимейтов (автоматический режим)
+## 1. Teammate avoidance (auto mode)
 
-**Статус:** не начато
+**Status:** not started
 
-**Сейчас:** в `separate()` левая половина поля (`x < width/2`) считается «своими» (`good`), правая — врагами (`bad`). Тимейты в авто-режиме не участвуют в формуле, но и не фильтруются явно.
+**Current:** in `separate()`, the left half of the field (`x < width/2`) is treated as allies (`good`), the right as enemies (`bad`). Teammates do not appear in the auto formula but are not filtered explicitly either.
 
-**Нужно:**
-- [ ] Явно отделять активного игрока от тимейтов (не только «лево/право»).
-- [ ] Не строить отрезки через/к тимейтам.
-- [ ] Продумать, как отличать тимейта от врага (цвет, позиция, размер, команда).
-
----
-
-## 2. Враг — круг, не точка (автоматический режим)
-
-**Статус:** не начато
-
-**Сейчас:** `direct_line()` строит линию к **центру** круга. Радиус врага (`i[2]` из Hough) не используется.
-
-**Важно:** попадание засчитывается в **любую часть круга** врага. Если радиус определён неточно (промах на пиксель) — траектория может пройти мимо. Нужна **точная** оценка радиуса, не только центра.
-
-**Идея:** если враги близко по X, одним отрезком можно «забрать» нескольких — линия проходит через их круги «по дороге», формула короче.
-
-**Нужно:**
-- [ ] Точно определять радиус каждого врага (Hough + проверка/уточнение).
-- [ ] Строить траекторию с учётом радиуса, а не только центра.
-- [ ] При близких врагах по X — проверять, можно ли одним сегментом зацепить нескольких.
-- [ ] Оптимизировать порядок/набор целей для минимальной формулы.
+**Needed:**
+- [ ] Explicitly separate the active player from teammates (not just left/right split).
+- [ ] Do not route segments through or toward teammates.
+- [ ] Decide how to tell a teammate from an enemy (color, position, size, team).
 
 ---
 
-## 3. Автоматический обход препятствий (чёрные круги, автоматический режим)
+## 2. Enemy as a circle, not a point (auto mode)
 
-**Статус:** не начато (есть задел)
+**Status:** not started
 
-**Сейчас:**
-- `detect_black_circles()` написан, но **закомментирован** в `main()` (режим 0).
-- В `Visuals in p5.js/sketch.js` — прототип A*, **не подключён** к Python. **Пока не трогаем** p5.js — только как референс идей.
+**Current:** `direct_line()` aims at the circle **center**. Enemy radius (`i[2]` from Hough) is unused.
 
-**Важно:** попадание в чёрный круг = **конец раунда** (условная «смерть»). Обход обязателен в авто-режиме.
+**Important:** a hit counts anywhere on the enemy **circle**. If radius is off by even a pixel, the trajectory may miss. Need an **accurate** radius estimate, not just the center.
 
-**Нужно:**
-- [ ] Включить детекцию чёрных кругов в авто-режиме.
-- [ ] Алгоритм обхода (свой или адаптация идей из p5.js) → серия точек → сегменты `direct_line()`.
-- [ ] Ограничение «движение только вправо» (как в игре).
+**Idea:** when enemies are close in X, one segment can take several — the line passes through their circles along the way and the formula stays shorter.
 
----
-
-## 4. Улучшенный поиск активного персонажа (автоматический режим)
-
-**Статус:** не начато
-
-**Сейчас:** активный = **самый большой** кружок по радиусу. Это ненадёжно.
-
-**Подсказка из игры:** активный персонаж **слегка обведён красным**. Можно искать через цветовую маску / контур.
-
-**Нужно:**
-- [ ] Маска по красной обводке активного игрока (приоритетный вариант).
-- [ ] Запасные эвристики: размер, позиция, отличие от тимейтов/врагов.
-- [ ] Связать с калибровочной утилитой (#11) для подбора порогов.
+**Needed:**
+- [ ] Measure each enemy radius accurately (Hough + validation/refinement).
+- [ ] Build trajectories using radius, not center only.
+- [ ] When enemies are close in X, check whether one segment can clip multiple targets.
+- [ ] Optimize target order/set for the shortest formula.
 
 ---
 
-## 5. Ручной режим: клик «левее» = прямая вниз
+## 3. Automatic obstacle avoidance (black circles, auto mode)
 
-**Статус:** отложено (откат к простым кликам + сортировка по X)
+**Status:** not started (partial groundwork)
 
-**Сейчас в GraphBot.py:** классический режим — клики сортируются по X, сегменты `direct_line`. Вертикали — позже отдельной задачей.
+**Current:**
+- `detect_black_circles()` exists but is **commented out** in `main()` (mode 0).
+- Prototype A* lives in `Visuals in p5.js/astar-pathfinding/` — **not wired** to Python. **Leave p5.js alone for now** — reference only.
 
----
+**Important:** hitting a black circle ends the round (effective “death”). Avoidance is mandatory in auto mode.
 
-## 6. Аккуратная обработка «игроков не найдено»
-
-**Статус:** ✅ сделано
-
-**Реализация (`GraphBot.py`):**
-- `warn_no_players()` — понятное сообщение + подсказки по калибровке
-- Авто-режим: `continue` вместо краша; отдельно если нет врагов справа
-- Режим кликов: `continue` если игроков нет; если кликов нет — тоже без падения
+**Needed:**
+- [ ] Enable black-circle detection in auto mode.
+- [ ] Avoidance algorithm (new or adapted from p5.js ideas) → waypoint chain → `direct_line()` segments.
+- [ ] Enforce “movement only to the right” (as in the game).
 
 ---
 
-## 7. UX: убрать лишние F-клавиши, не закрывать после формулы
+## 4. Better active-player detection (auto mode)
 
-**Статус:** не начато (обсуждение)
+**Status:** not started
 
-**Сейчас:**
-- F1 — старт после выбора режима.
-- F2 — выход.
-- F3/F4 — начало/конец сбора кликов.
-- Режим кликов после формулы вызывает `safe_exit(0)` — программа закрывается.
-- Busy-wait на клавишах грузит CPU.
+**Current:** active player = **largest** circle by radius. Unreliable.
 
-**Желаемое поведение:**
-- Меньше обязательных нажатий.
-- После выдачи формулы программа **остаётся работать** (можно пересчитать, новый раунд).
-- Без крутящихся циклов `while not key: pass`.
+**Game hint:** the active character has a **slight red outline**. Can be detected with a color mask / contour.
 
-**Варианты (выбрать при реализации):**
-
-| Вариант | Авто-режим | Ручной режим |
-|---------|------------|--------------|
-| **A. Сразу после выбора режима** | Старт без F1; цикл обновления формулы | Сразу ждать клики |
-| **B. Окно OpenCV** | `cv2.waitKey()` вместо busy-wait; `q` — выход, `r` — пересчёт | Клики + ПКМ или Enter = «готово» |
-| **C. Одна клавиша** | Пробел = «обновить сейчас», Esc = выход | Пробел = «собрать формулу», Esc = выход |
-| **D. Авто по фокусу** | Когда окно Graphwar активно — обновлять каждые N мс | — |
-
-**Рекомендация:** вариант **B** — окно превью уже есть (`cv2.imshow`), логично повесить управление туда; в ручном режиме **ПКМ или Enter** вместо F4; **Esc** вместо F2; убрать F1/F3.
-
-**Нужно:**
-- [ ] Выбрать схему управления с пользователем.
-- [ ] Заменить busy-wait на `waitKey` / таймер.
-- [ ] Убрать `safe_exit(0)` после ручного режима — вернуться в цикл или ждать следующей команды.
-- [ ] Подсказки в консоли: какие клавиши/действия сейчас активны.
+**Needed:**
+- [ ] Mask for the active player’s red outline (preferred approach).
+- [ ] Fallback heuristics: size, position, difference from teammates/enemies.
+- [ ] Tie into the calibration utility (#11) for threshold tuning.
 
 ---
 
-## 8. Жёсткие константы поля и окна
+## 5. Manual mode: click “to the left” = straight down
 
-**Статус:** не начато (низкий приоритет)
+**Status:** deferred (reverted to simple clicks + sort by X)
 
-**Сейчас:** `field = {left: 14, top: 52, width: 772, height: 452}`, окно `(-7, 0)`.
-
-**Контекст:** игра всегда в одном разрешении — с этим проблем мало. Но отступы `left`/`top` могут чуть отличаться (Windows 10 vs 11, рамка окна).
-
-**Нужно (опционально):**
-- [ ] Брать размер окна Graphwar через `GetWindowRect` и вычислять поле относительно него.
-- [ ] Или один раз сохранять отступы из калибровочной утилиты (#11).
+**Current in GraphBot.py:** classic mode — clicks sorted by X, `direct_line` segments. Vertical segments are a separate task later.
 
 ---
 
-## 9. Калибровочная утилита (отдельная программа)
+## 6. Graceful “no players found” handling
 
-**Статус:** не начато
+**Status:** ✅ done
 
-**Цель:** небольшая программа для **подбора коэффициентов** детекции — крутишь ползунки/параметры и сразу видишь результат на скриншоте игры.
-
-**Что показывать на превью:**
-- [ ] Найденные враги (круг + центр + радиус).
-- [ ] Активный персонаж (красная обводка / маска).
-- [ ] Тимейты (если отличим).
-- [ ] Чёрные круги-препятствия.
-- [ ] Границы захватываемого поля (`field`).
-
-**Что крутить:**
-- [ ] Grayscale-пороги маски игроков (`lower_bound`, `upper_bound`, дырка 169–171).
-- [ ] Параметры Hough (`param1`, `param2`, `minRadius`, `maxRadius`, blur).
-- [ ] Пороги для чёрных кругов.
-- [ ] Пороги/цвет для красной обводки активного.
-- [ ] Отступы поля `left`, `top`, `width`, `height`.
-
-**Формат:** отдельный файл, например `calibrate.py` или `GraphBot_calibrate.py`. По итогу — сохранение конфига (JSON), который читает основной `GraphBot.py`.
+**Implementation (`GraphBot.py`):**
+- `warn_no_players()` — clear message + calibration hints
+- Auto mode: `continue` instead of crash; separate branch when no enemies on the right
+- Click mode: `continue` when no players; no crash when there are no clicks either
 
 ---
 
-## Известные проблемы (справочно)
+## 7. UX: fewer F-keys, don’t exit after formula
 
-| # | Проблема | Статус |
-|---|----------|--------|
-| A | Краш при `detect_players() == None` | ✅ **#6** |
-| B | `separate()` — хрупкая логика good/bad/active | → **#1**, **#4** |
-| C | Жёсткие константы поля | → **#8**, **#11** |
-| D | Только Windows | осознанно |
-| E | Busy-wait F1/F3/F4 | → задача **#7** |
-| F | A* в p5.js — баги прототипа | **не трогаем** |
+**Status:** not started (discussion)
+
+**Current:**
+- F1 — start after mode selection.
+- F2 — quit.
+- F3/F4 — begin/end click collection.
+- Click mode calls `safe_exit(0)` after the formula — program exits.
+- Busy-wait on keys wastes CPU.
+
+**Desired behavior:**
+- Fewer required key presses.
+- After printing a formula the program **keeps running** (recalculate, new round).
+- No spinning `while not key: pass` loops.
+
+**Options (pick when implementing):**
+
+| Option | Auto mode | Manual mode |
+|--------|-----------|-------------|
+| **A. Right after mode pick** | Start without F1; formula refresh loop | Wait for clicks immediately |
+| **B. OpenCV window** | `cv2.waitKey()` instead of busy-wait; `q` quit, `r` refresh | Clicks + RMB or Enter = done |
+| **C. Single key** | Space = refresh now, Esc = quit | Space = build formula, Esc = quit |
+| **D. Focus-based auto** | When Graphwar is focused — refresh every N ms | — |
+
+**Recommendation:** option **B** — preview window already exists (`cv2.imshow`), natural place for controls; in manual mode **RMB or Enter** instead of F4; **Esc** instead of F2; drop F1/F3.
+
+**Needed:**
+- [ ] Agree on control scheme with the user.
+- [ ] Replace busy-wait with `waitKey` / timer.
+- [ ] Remove `safe_exit(0)` after manual mode — return to loop or wait for next command.
+- [ ] Console hints for active keys/actions.
 
 ---
 
-- [ ] **#8 (частично):** захват поля через Win32 + `capture_config.json` — сделано
-- [ ] **#11 (частично):** `calibrate_active.py` — калибровка активного по красному свечению
+## 8. Hard-coded field and window constants
 
-1. ~~**#6**~~ — сделано
-2. **#11** — калибровка (частично: preview + calibrate_active + calibrate_players)
-3. **#4** — активный по красной обводке (частично через calibrate_active)
-4. **#7** — UX без F-клавиш
-5. ~~**#5**~~ — вертикаль «вниз» в ручном режиме — сделано
-6. **#1** — тимейты.
-7. **#2** — радиус врага.
-8. **#3** — обход чёрных кругов.
-9. **#8** — по необходости.
+**Status:** not started (low priority)
+
+**Current:** `field = {left: 14, top: 52, width: 772, height: 452}`, window `(-7, 0)`.
+
+**Context:** the game is always one resolution — usually fine. But `left`/`top` margins may differ slightly (Windows 10 vs 11, window frame).
+
+**Needed (optional):**
+- [ ] Read Graphwar window size via `GetWindowRect` and derive the field relative to it.
+- [ ] Or save margins once from the calibration utility (#11).
 
 ---
 
-*Последнее обновление: 2025-06-14 (уточнения по голосовому разбору)*
+## 9. Calibration utility (standalone program)
+
+**Status:** not started
+
+**Goal:** small tool to **tune detection coefficients** — adjust sliders/parameters and see results on a game screenshot immediately.
+
+**Show on preview:**
+- [ ] Detected enemies (circle + center + radius).
+- [ ] Active character (red outline / mask).
+- [ ] Teammates (if distinguishable).
+- [ ] Black obstacle circles.
+- [ ] Captured field bounds (`field`).
+
+**Tune:**
+- [ ] Grayscale thresholds for player mask (`lower_bound`, `upper_bound`, hole 169–171).
+- [ ] Hough parameters (`param1`, `param2`, `minRadius`, `maxRadius`, blur).
+- [ ] Black-circle thresholds.
+- [ ] Red-outline thresholds/color for active player.
+- [ ] Field margins `left`, `top`, `width`, `height`.
+
+**Format:** separate file, e.g. `calibrate.py` or `GraphBot_calibrate.py`. Save JSON config read by main `GraphBot.py`.
+
+---
+
+## Known issues (reference)
+
+| # | Issue | Status |
+|---|-------|--------|
+| A | Crash when `detect_players() == None` | ✅ **#6** |
+| B | `separate()` — fragile good/bad/active logic | → **#1**, **#4** |
+| C | Hard-coded field constants | → **#8**, **#11** |
+| D | Windows only | by design |
+| E | Busy-wait F1/F3/F4 | → task **#7** |
+| F | A* in p5.js — prototype bugs | **do not touch** |
+
+---
+
+- [ ] **#8 (partial):** Win32 field capture + `capture_config.json` — done
+- [ ] **#11 (partial):** `calibrate_active.py` — active player calibration via red glow
+
+1. ~~**#6**~~ — done
+2. **#11** — calibration (partial: preview + calibrate_active + calibrate_players)
+3. **#4** — active player via red outline (partial via calibrate_active)
+4. **#7** — UX without F-keys
+5. ~~**#5**~~ — vertical “down” in manual mode — done
+6. **#1** — teammates
+7. **#2** — enemy radius
+8. **#3** — black-circle avoidance
+9. **#8** — as needed
+
+---
+
+*Last updated: 2025-06-14 (voice-review clarifications)*

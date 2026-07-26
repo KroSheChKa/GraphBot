@@ -101,6 +101,10 @@ canvas {
   height: 16px;
 }
 
+#btn-capture-field {
+  margin-bottom: 10px;
+}
+
 #controls-panel button {
   width: 100%;
   margin-top: 4px;
@@ -199,5 +203,5 @@ canvas {
 }
 
 .method-picker.nested {
-  margin-bottom: 0;
+  margin-bottom: 10px;
 }
