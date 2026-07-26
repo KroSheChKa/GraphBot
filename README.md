@@ -30,6 +30,7 @@ https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
   - [Sigmoid network (universal approximation)](#2-sigmoid-network-universal-approximation)
   - [Taylor features (polynomial / beta)](#3-taylor-features-polynomial--beta)
   - [Fourier features (harmonics)](#4-fourier-features-harmonics)
+  - [Activation functions (Taylor / Fourier MLP)](#activation-functions-taylor--fourier-mlp)
 - [Auto mode (work in progress)](#auto-mode-work-in-progress)
 - [Project layout](#project-layout)
 - [Roadmap](#roadmap)
@@ -138,9 +139,12 @@ Switch to **2. Draw mode** in the side panel, then pick an approximation method:
 |--------|---------|
 | Draw target curve | Click and drag on the canvas |
 | Adjust dataset density | **Шаг датасета** slider |
+| Hidden-layer activation (Taylor / Fourier) | **Активация скрытых слоёв** — only when hidden layers ≥ 1 |
 | Retrain after parameter change | **Переобучить** |
 
 Formula output: **`y=...`** (Graphwar syntax). Compare MSE in the status line before copying.
+
+Taylor and Fourier methods with **≥ 1 hidden layer** use a small MLP on feature vector $\varphi(t)$. Pick the activation in the side panel — see [Activation functions](#activation-functions-taylor--fourier-mlp).
 
 ---
 
@@ -345,7 +349,7 @@ t = \frac{x - c}{s}, \qquad
 \varphi(t) = \bigl[1,\; t,\; t^2,\; \ldots,\; t^n\bigr]
 $$
 
-**With hidden layers:** $\varphi(t) \rightarrow \text{MLP with tanh} \rightarrow y$
+**With hidden layers:** $\varphi(t) \rightarrow \text{MLP with chosen activation} \rightarrow y$ (see [Activation functions](#activation-functions-taylor--fourier-mlp))
 
 **With 0 hidden layers:** pure polynomial in $t$ (expanded to powers of $x$ for Graphwar export).
 
@@ -354,6 +358,7 @@ $$
 | `taylorOrder` | Highest power $n$ |
 | `taylorHiddenLayers` | `0` = pure polynomial; `>0` = MLP on features |
 | `taylorHiddenSize` | Width of hidden layers |
+| `mlpActivation` | Nonlinearity between hidden layers (`tanh`, `ReLU`, `Swish`, …) |
 
 <p align="center">
   <img src="docs/images/draw-mode-taylor.png" alt="Taylor feature approximation (add screenshot here)" width="720" />
@@ -372,17 +377,61 @@ $$
 
 **With 0 hidden layers:** linear combination of harmonics (Fourier-like sum).
 
-**With hidden layers:** richer expressivity via MLP on $\varphi(t)$.
+**With hidden layers:** richer expressivity via MLP on $\varphi(t)$ and a configurable activation (same list as Taylor — [below](#activation-functions-taylor--fourier-mlp)).
 
 | Parameter | Role |
 |-------------|------|
 | `fourierHarmonics` | Number of harmonic pairs $K$ |
 | `fourierHiddenLayers` | `0` = pure harmonic sum |
 | `fourierHiddenSize` | Hidden layer width when MLP is used |
+| `mlpActivation` | Nonlinearity between hidden layers |
 
 <p align="center">
   <img src="docs/images/draw-mode-fourier.png" alt="Fourier feature approximation (add screenshot here)" width="720" />
 </p>
+
+---
+
+### Activation functions (Taylor / Fourier MLP)
+
+When **Taylor** or **Fourier** uses **≥ 1 hidden layer**, the web UI trains a small MLP on feature vector $\varphi(t)$. Choose the nonlinearity in **Активация скрытых слоёв** (disabled at 0 hidden layers — then the model is purely linear on $\varphi$).
+
+| Activation | Notes |
+|------------|--------|
+| **tanh** | Default; smooth, bounded |
+| **sigmoid (σ)** | Classic logistic |
+| **ReLU** | Common in modern nets; see Graphwar export below |
+| **Leaky ReLU** | Small slope on $x < 0$ |
+| **Softplus** | Smooth ReLU-like: $\ln(1 + e^x)$ |
+| **Swish / SiLU** | $x \cdot \sigma(x)$ — popular in EfficientNet-style models |
+| **GELU (approx)** | Transformer-style nonlinearity |
+| **Mish** | $x \cdot \tanh(\ln(1 + e^x))$ — used in many modern detectors |
+
+All exported formulas use **only** Graphwar builtins: `+`, `-`, `*`, `/`, `^`, `sqrt`, `log`, `ln`, `abs`, `sin`, `cos`, `tan`, `exp`. There is **no** `max()` or `min()` in the game ([`GAME_RULES.md`](GAME_RULES.md)).
+
+#### ReLU without `max()`
+
+Standard ReLU is $\mathrm{ReLU}(x) = \max(0, x)$. Graphwar cannot parse `max`, so GraphBot exports the equivalent form:
+
+$$
+\max(0, x) = \frac{x + |x|}{2}
+$$
+
+For $x \ge 0$: $|x| = x$ → $(x + x)/2 = x$. For $x < 0$: $|x| = -x$ → $(x - x)/2 = 0$.
+
+<p align="center">
+  <img src="docs/images/relu-graphwar-equivalence.svg" alt="ReLU: max(0,x) and (x+|x|)/2 are the same curve" width="640" />
+</p>
+
+*Solid blue:* $\max(0, x)$ (used internally while training). *Dashed red:* $(x + |x|)/2$ (what you paste into Graphwar). Same graph.
+
+**Example in a formula** (hidden pre-activation $z$):
+
+```
+((z)+abs(z))/2
+```
+
+Leaky ReLU uses the same trick: $\max(0,z) + \alpha\min(0,z)$ is written with `abs(z)` only — no `max`/`min`.
 
 ---
 
@@ -468,6 +517,8 @@ High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in
 
 ### Done recently
 
+- [x] **Draw mode:** activation picker for Taylor / Fourier MLP (`tanh`, `ReLU`, `Swish`, `GELU`, `Mish`, …)
+- [x] **Graphwar-safe ReLU export** — `max(0,x)` → `(x+|x|)/2` in copied formulas
 - [x] Web UI with **Click mode** (default) + **Draw mode** (4 approximation methods)
 - [x] Click mode: manual soldier (**A**), vertical segments on left-click, formula without `y=`
 - [x] Field capture resets previous clicks / strokes in the web UI

@@ -191,8 +191,20 @@ class SigmoidNetwork {
 
 const MAX_FEATURE_MLP_WEIGHT = 30;
 const MAX_FEATURE_MLP_BIAS = 20;
-const FEATURE_MLP_ACTIVATIONS = ["tanh", "relu", "sigmoid"];
+const FEATURE_MLP_ACTIVATIONS = [
+  "tanh",
+  "sigmoid",
+  "relu",
+  "leaky_relu",
+  "softplus",
+  "swish",
+  "gelu",
+  "mish",
+];
 const FOURIER_PI = Math.round(Math.PI * 10000) / 10000;
+const GELU_SQRT_2_OVER_PI = 0.797885;
+const GELU_CUBIC_COEF = 0.044715;
+const LEAKY_RELU_ALPHA = 0.01;
 
 class FeatureMlpNetwork {
   constructor(numHiddenLayers, hiddenSize, activation = "tanh") {
@@ -226,15 +238,15 @@ class FeatureMlpNetwork {
   }
 
   activate(z) {
-    if (this.activation === "relu") return Math.max(0, z);
-    if (this.activation === "sigmoid") return featureMlpSigmoid(z);
-    return Math.tanh(z);
+    return featureMlpActivate(this.activation, z);
   }
 
   activateDerivFromPre(z, activated) {
-    if (this.activation === "relu") return z > 0 ? 1 : 0;
-    if (this.activation === "sigmoid") return activated * (1 - activated);
-    return 1 - activated * activated;
+    return featureMlpActivateDeriv(this.activation, z, activated);
+  }
+
+  usesHeInit() {
+    return this.activation === "relu" || this.activation === "leaky_relu";
   }
 
   buildLayers(outputBias = 0) {
@@ -247,7 +259,7 @@ class FeatureMlpNetwork {
       const inD = sizes[l];
       const outD = sizes[l + 1];
       const isHidden = l < sizes.length - 2;
-      const scale = isHidden && this.activation === "relu"
+      const scale = isHidden && this.usesHeInit()
         ? Math.sqrt(2 / inD)
         : Math.sqrt(6 / (inD + outD));
 
@@ -438,9 +450,7 @@ class FeatureMlpNetwork {
   }
 
   activationDesmos(zExpr) {
-    if (this.activation === "relu") return `max(0,${zExpr})`;
-    if (this.activation === "sigmoid") return `(1/(1+exp(-${zExpr})))`;
-    return `tanh(${zExpr})`;
+    return featureMlpActivationDesmos(this.activation, zExpr);
   }
 
   linearDesmosFromOutputLayer(minWeight = 0.005) {
@@ -648,6 +658,110 @@ function featureMlpSigmoid(z) {
   }
   const ez = Math.exp(z);
   return ez / (1 + ez);
+}
+
+function featureMlpSoftplus(z) {
+  if (z > 20) return z;
+  if (z < -20) return Math.exp(z);
+  return Math.log1p(Math.exp(z));
+}
+
+function featureMlpRelu(z) {
+  return Math.max(0, z);
+}
+
+function featureMlpLeakyRelu(z) {
+  return z >= 0 ? z : LEAKY_RELU_ALPHA * z;
+}
+
+function featureMlpGelu(z) {
+  const u = GELU_SQRT_2_OVER_PI * (z + GELU_CUBIC_COEF * z * z * z);
+  return 0.5 * z * (1 + Math.tanh(u));
+}
+
+function featureMlpSwish(z) {
+  return z * featureMlpSigmoid(z);
+}
+
+function featureMlpMish(z) {
+  return z * Math.tanh(featureMlpSoftplus(z));
+}
+
+function featureMlpActivate(activation, z) {
+  switch (activation) {
+    case "relu":
+      return featureMlpRelu(z);
+    case "leaky_relu":
+      return featureMlpLeakyRelu(z);
+    case "softplus":
+      return featureMlpSoftplus(z);
+    case "swish":
+      return featureMlpSwish(z);
+    case "gelu":
+      return featureMlpGelu(z);
+    case "mish":
+      return featureMlpMish(z);
+    case "sigmoid":
+      return featureMlpSigmoid(z);
+    default:
+      return Math.tanh(z);
+  }
+}
+
+function featureMlpActivateDeriv(activation, z, activated) {
+  switch (activation) {
+    case "relu":
+      return z > 0 ? 1 : 0;
+    case "leaky_relu":
+      return z >= 0 ? 1 : LEAKY_RELU_ALPHA;
+    case "softplus":
+      return featureMlpSigmoid(z);
+    case "swish": {
+      const s = featureMlpSigmoid(z);
+      return s * (1 + z * (1 - s));
+    }
+    case "gelu": {
+      const u = GELU_SQRT_2_OVER_PI * (z + GELU_CUBIC_COEF * z * z * z);
+      const t = Math.tanh(u);
+      const sech2 = 1 - t * t;
+      const uPrime = GELU_SQRT_2_OVER_PI * (1 + 3 * GELU_CUBIC_COEF * z * z);
+      return 0.5 * (1 + t) + 0.5 * z * sech2 * uPrime;
+    }
+    case "mish": {
+      const sp = featureMlpSoftplus(z);
+      const t = Math.tanh(sp);
+      const sech2 = 1 - t * t;
+      return t + z * sech2 * featureMlpSigmoid(z);
+    }
+    case "sigmoid":
+      return activated * (1 - activated);
+    default:
+      return 1 - activated * activated;
+  }
+}
+
+function featureMlpActivationDesmos(activation, zExpr) {
+  // GraphWar: + - / * ^ sqrt log ln abs sin cos tan exp (no max/min)
+  switch (activation) {
+    case "relu":
+      // max(0,z) = (z + |z|) / 2
+      return `((${zExpr})+abs(${zExpr}))/2`;
+    case "leaky_relu":
+      // max(0,z) + α·min(0,z)
+      return `(((${zExpr})+abs(${zExpr}))/2+${LEAKY_RELU_ALPHA}*((${zExpr})-abs(${zExpr}))/2)`;
+    case "softplus":
+      return `ln(1+exp(${zExpr}))`;
+    case "swish":
+      return `(${zExpr})/(1+exp(-${zExpr}))`;
+    case "gelu":
+      return `(0.5*(${zExpr})*(1+tanh(${GELU_SQRT_2_OVER_PI}*((${zExpr})+${GELU_CUBIC_COEF}*(${zExpr})^3))))`;
+    case "mish":
+      return `(${zExpr})*tanh(ln(1+exp(${zExpr})))`;
+    case "sigmoid":
+      return `(1/(1+exp(-${zExpr})))`;
+    default:
+      return `tanh(${zExpr})`;
+  }
 }
 
 function linearLayer(W, b, input) {

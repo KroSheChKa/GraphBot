@@ -27,6 +27,7 @@ const DEFAULT_PARAMS = {
   fourierHarmonics: 8,
   fourierHiddenLayers: 2,
   fourierHiddenSize: 16,
+  mlpActivation: "tanh",
   trainEpochs: 500,
   trainLr: 0.02,
   showNeurons: true,
@@ -101,7 +102,33 @@ function draw() {
   }
 }
 
-const FEATURE_MLP_ACTIVATION = "tanh";
+const MLP_ACTIVATION_OPTIONS = [
+  { value: "tanh", label: "tanh" },
+  { value: "sigmoid", label: "sigmoid (σ)" },
+  { value: "relu", label: "ReLU" },
+  { value: "leaky_relu", label: "Leaky ReLU" },
+  { value: "softplus", label: "Softplus" },
+  { value: "swish", label: "Swish / SiLU" },
+  { value: "gelu", label: "GELU (approx)" },
+  { value: "mish", label: "Mish" },
+];
+
+function controlActivationSelect() {
+  const disabled = mlpHiddenLayerCount() <= 0;
+  return controlSelect(
+    "mlpActivation",
+    "Активация скрытых слоёв",
+    MLP_ACTIVATION_OPTIONS,
+    params.mlpActivation ?? "tanh",
+    { disabled, title: disabled ? "Нужен хотя бы один скрытый слой" : "" }
+  );
+}
+
+function mlpHiddenLayerCount() {
+  if (params.approxMethod === "taylor") return params.taylorHiddenLayers;
+  if (params.approxMethod === "fourier") return params.fourierHiddenLayers;
+  return 0;
+}
 
 function buildControlsPanel() {
   let drawMethodControls = "";
@@ -128,16 +155,18 @@ function buildControlsPanel() {
       ${controlSlider("taylorOrder", "Порядок n (вход φ)", 1, 20, 1, params.taylorOrder, 0)}
       ${controlSlider("taylorHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.taylorHiddenLayers, 0)}
       ${controlSlider("taylorHiddenSize", "Нейронов в слое", 2, 64, 1, params.taylorHiddenSize, 0)}
+      ${controlActivationSelect()}
       ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Переобучить</button>
-      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = между φ и y стоит tanh.</p>
+      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 скрытых слоёв = чистый полином; &gt;0 = нелинейная активация между φ и y.</p>
     `;
     } else if (params.approxMethod === "fourier") {
       drawMethodControls = `
       ${controlSlider("fourierHarmonics", "Гармоник K", 1, 40, 1, params.fourierHarmonics, 0)}
       ${controlSlider("fourierHiddenLayers", "Скрытых слоёв", 0, 4, 1, params.fourierHiddenLayers, 0)}
       ${controlSlider("fourierHiddenSize", "Нейронов в слое", 2, 64, 1, params.fourierHiddenSize, 0)}
+      ${controlActivationSelect()}
       ${controlSlider("trainEpochs", "Эпох", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Переобучить</button>
@@ -189,6 +218,15 @@ function buildControlsPanel() {
   `;
 
   controlsEl.querySelectorAll("[data-param]").forEach((input) => {
+    if (input.dataset.param === "mlpActivation") {
+      input.dataset.lastValue = input.value;
+      input.addEventListener("change", onMlpActivationChange);
+      return;
+    }
+    if (input.tagName === "SELECT") {
+      input.addEventListener("change", onParamChange);
+      return;
+    }
     input.addEventListener("input", onParamInput);
     input.addEventListener("change", onParamChange);
   });
@@ -217,6 +255,7 @@ function buildControlsPanel() {
   });
   statusMseEl = document.getElementById("status-mse");
   syncSliderLabels();
+  syncActivationSelectState();
   updateCopyButton();
   updateCaptureButton();
   updateStatusPanel();
@@ -269,17 +308,19 @@ function controlCheckbox(key, label, checked) {
   `;
 }
 
-function controlSelect(key, label, options, value) {
+function controlSelect(key, label, options, value, { disabled = false, title = "" } = {}) {
   const opts = options
     .map(
       (opt) =>
         `<option value="${opt.value}" ${opt.value === value ? "selected" : ""}>${opt.label}</option>`
     )
     .join("");
+  const disabledAttr = disabled ? " disabled" : "";
+  const titleAttr = title ? ` title="${title}"` : "";
   return `
     <label class="control">
       <div class="control-head"><span>${label}</span></div>
-      <select data-param="${key}">${opts}</select>
+      <select data-param="${key}"${disabledAttr}${titleAttr}>${opts}</select>
     </label>
   `;
 }
@@ -337,18 +378,18 @@ function syncSliderLabels() {
   });
 }
 
+function readParamFromInput(input) {
+  if (input.type === "checkbox") return input.checked;
+  if (input.type === "radio") return input.value;
+  if (input.tagName === "SELECT") return input.value;
+  return parseFloat(input.value);
+}
+
 function readParamsFromUI() {
   controlsEl.querySelectorAll("[data-param]").forEach((input) => {
     const key = input.dataset.param;
-    if (input.type === "checkbox") {
-      params[key] = input.checked;
-    } else if (input.type === "radio") {
-      if (input.checked) params[key] = input.value;
-    } else if (input.tagName === "SELECT") {
-      params[key] = input.value;
-    } else {
-      params[key] = parseFloat(input.value);
-    }
+    if (input.type === "radio" && !input.checked) return;
+    params[key] = readParamFromInput(input);
   });
 }
 
@@ -360,12 +401,31 @@ function onParamInput(event) {
   if (label) label.textContent = formatParam(key, parseFloat(input.value), decimals);
 }
 
+function onMlpActivationChange(event) {
+  const select = event.target;
+  const newValue = select.value;
+  if (newValue === select.dataset.lastValue) return;
+  select.dataset.lastValue = newValue;
+  params.mlpActivation = newValue;
+  if (params.inputMode !== "draw" || drawnPoints.length === 0) return;
+  rerunPipeline();
+}
+
 function onParamChange(event) {
+  const input = event.target;
+  const changedKey = input?.dataset?.param;
+  if (!changedKey) return;
+  if (input.type === "radio" && !input.checked) return;
+
   const prevInputMode = params.inputMode;
   const prevMethod = params.approxMethod;
-  readParamsFromUI();
+  const prevValue = params[changedKey];
+  const newValue = readParamFromInput(input);
 
-  if (event?.target?.dataset?.param === "inputMode" && params.inputMode !== prevInputMode) {
+  readParamsFromUI();
+  syncActivationSelectState();
+
+  if (changedKey === "inputMode" && params.inputMode !== prevInputMode) {
     clearWorkspaceState();
     buildControlsPanel();
     return;
@@ -373,7 +433,7 @@ function onParamChange(event) {
 
   if (params.inputMode !== "draw") return;
 
-  if (event?.target?.dataset?.param === "approxMethod" && params.approxMethod !== prevMethod) {
+  if (changedKey === "approxMethod" && params.approxMethod !== prevMethod) {
     buildControlsPanel();
     if (params.approxMethod === "sigmoid" && trainingData.length >= 2) {
       trainSigmoidNetwork();
@@ -389,7 +449,17 @@ function onParamChange(event) {
     logActiveFormula();
     return;
   }
-  if (drawnPoints.length > 0) rerunPipeline();
+  if (drawnPoints.length > 0 && newValue !== prevValue) {
+    rerunPipeline();
+  }
+}
+
+function syncActivationSelectState() {
+  const select = controlsEl?.querySelector('[data-param="mlpActivation"]');
+  if (!select) return;
+  const enabled = mlpHiddenLayerCount() > 0;
+  select.disabled = !enabled;
+  select.title = enabled ? "" : "Нужен хотя бы один скрытый слой";
 }
 
 function resetParams() {
@@ -586,14 +656,16 @@ function drawNetworkOverlay() {
   } else if (params.approxMethod === "taylor" && network) {
     const center = roundCoord(network.center);
     const scale = roundCoord(network.scale);
-    text(`n=${params.taylorOrder}  L=${params.taylorHiddenLayers}×${params.taylorHiddenSize}`, 12, 12);
+    const act = params.taylorHiddenLayers > 0 ? `  ${network.activation}` : "";
+    text(`n=${params.taylorOrder}  L=${params.taylorHiddenLayers}×${params.taylorHiddenSize}${act}`, 12, 12);
     text(`c=${center}  s=${scale}`, 12, 28);
     fill(...COLORS.approx);
     text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 44);
   } else if (params.approxMethod === "fourier" && network) {
     const center = roundCoord(network.center);
     const scale = roundCoord(network.scale);
-    text(`K=${params.fourierHarmonics}  L=${params.fourierHiddenLayers}×${params.fourierHiddenSize}`, 12, 12);
+    const act = params.fourierHiddenLayers > 0 ? `  ${network.activation}` : "";
+    text(`K=${params.fourierHarmonics}  L=${params.fourierHiddenLayers}×${params.fourierHiddenSize}${act}`, 12, 12);
     text(`c=${center}  s=${scale}`, 12, 28);
     fill(...COLORS.approx);
     text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 44);
@@ -981,11 +1053,12 @@ function trainSigmoidNetwork() {
 }
 
 function trainTaylorNetwork() {
+  const activation = params.mlpActivation ?? "tanh";
   network = new TaylorNetwork(
     params.taylorOrder,
     params.taylorHiddenLayers,
     params.taylorHiddenSize,
-    FEATURE_MLP_ACTIVATION
+    activation
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
   network.train(trainingData, params.trainEpochs, params.trainLr);
@@ -993,11 +1066,12 @@ function trainTaylorNetwork() {
 }
 
 function trainFourierNetwork() {
+  const activation = params.mlpActivation ?? "tanh";
   network = new FourierNetwork(
     params.fourierHarmonics,
     params.fourierHiddenLayers,
     params.fourierHiddenSize,
-    FEATURE_MLP_ACTIVATION
+    activation
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
   network.train(trainingData, params.trainEpochs, params.trainLr);
@@ -1118,9 +1192,9 @@ function mouseDragged() {
 }
 
 function mouseReleased() {
-  if (params.inputMode !== "draw") return;
+  if (params.inputMode !== "draw" || !isDrawing) return;
   isDrawing = false;
-  if (drawnPoints.length > 0) finishDrawing();
+  finishDrawing();
 }
 
 function addPointAtMouse() {

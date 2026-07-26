@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 400" role="img" aria-labelledby="relu-title relu-desc">
+  <title id="relu-title">ReLU and Graphwar-safe equivalent</title>
+  <desc id="relu-desc">Plot showing that max(0,x) and (x+abs(x))/2 are the same function</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fafafa"/>
+      <stop offset="100%" stop-color="#f0f0f0"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#444"/>
+    </marker>
+  </defs>
+  <rect width="720" height="400" fill="url(#bg)" rx="8"/>
+  <text x="360" y="34" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="18" font-weight="600" fill="#222">
+    ReLU: max(0, x) = (x + |x|) / 2
+  </text>
+  <text x="360" y="56" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#555">
+    Graphwar has no max()  exported formulas use the abs form instead
+  </text>
+
+  <!-- plot frame -->
+  <rect x="80" y="78" width="560" height="250" fill="#fff" stroke="#ccc" stroke-width="1" rx="4"/>
+  <!-- grid -->
+  <g stroke="#e8e8e8" stroke-width="1">
+    <line x1="173.3" y1="78" x2="173.3" y2="328"/>
+    <line x1="266.7" y1="78" x2="266.7" y2="328"/>
+    <line x1="360" y1="78" x2="360" y2="328"/>
+    <line x1="453.3" y1="78" x2="453.3" y2="328"/>
+    <line x1="546.7" y1="78" x2="546.7" y2="328"/>
+    <line x1="80" y1="121.4" x2="640" y2="121.4"/>
+    <line x1="80" y1="185" x2="640" y2="185"/>
+    <line x1="80" y1="248.6" x2="640" y2="248.6"/>
+  </g>
+  <!-- axes -->
+  <line x1="360" y1="78" x2="360" y2="328" stroke="#bbb" stroke-width="1.2"/>
+  <line x1="80" y1="248.6" x2="640" y2="248.6" stroke="#444" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="360" y1="328" x2="360" y2="78" stroke="#444" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="648" y="252" font-family="Consolas, monospace" font-size="12" fill="#444">x</text>
+  <text x="368" y="88" font-family="Consolas, monospace" font-size="12" fill="#444">y</text>
+  <text x="354" y="346" font-family="Consolas, monospace" font-size="11" fill="#666">0</text>
+  <text x="168" y="346" font-family="Consolas, monospace" font-size="11" fill="#666">3</text>
+  <text x="548" y="346" font-family="Consolas, monospace" font-size="11" fill="#666">3</text>
+
+  <!-- max(0,x) dashed (underlay, same path) -->
+  <polyline fill="none" stroke="#3d7be0" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"
+    points="80,248.6 360,248.6 640,78"/>
+  <!-- (x+|x|)/2 dashed overlay to show coincidence -->
+  <polyline fill="none" stroke="#e85d4c" stroke-width="2" stroke-dasharray="7 5" stroke-linecap="round" stroke-linejoin="round"
+    points="80,248.6 360,248.6 640,78" opacity="0.95"/>
+
+  <!-- legend -->
+  <rect x="92" y="88" width="300" height="58" fill="#ffffff" stroke="#ddd" rx="6" opacity="0.95"/>
+  <line x1="106" y1="108" x2="136" y2="108" stroke="#3d7be0" stroke-width="3.5"/>
+  <text x="144" y="112" font-family="Consolas, monospace" font-size="12" fill="#222">max(0, x)  not in Graphwar</text>
+  <line x1="106" y1="128" x2="136" y2="128" stroke="#e85d4c" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="144" y="132" font-family="Consolas, monospace" font-size="12" fill="#222">(x + |x|) / 2  exported form</text>
+
+  <text x="360" y="372" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="13" fill="#333">
+    Both formulas trace the same curve  zero for x &lt; 0, slope 1 for x &gt; 0
+  </text>
+</svg>
