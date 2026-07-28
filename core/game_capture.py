@@ -12,6 +12,7 @@ import win32con
 import win32gui
 
 from core.detection import find_active_player, load_active_params, load_players_params
+from core.forbidden_mask import build_forbidden_mask, load_forbidden_params
 from core.window_capture import (
     DEFAULT_GAME_WINDOW_NAME,
     find_game_window,
@@ -129,6 +130,21 @@ def capture_game_field(
         gx, gy = field_to_game(cx, cy, field["width"])
         active_norm = [gx, gy]
 
+    forbidden_grid = None
+    forbidden_stats = None
+    forbidden_error = None
+    try:
+        forbidden_result = build_forbidden_mask(
+            bgr,
+            params=load_forbidden_params(),
+            players=active_result.get("players"),
+        )
+        forbidden_grid = forbidden_result["grid_payload"]
+        forbidden_stats = forbidden_result["stats"]
+    except Exception as exc:
+        # Field capture remains usable even if a newly tuned mask is invalid.
+        forbidden_error = str(exc)
+
     return {
         "ok": True,
         "image": image,
@@ -137,4 +153,7 @@ def capture_game_field(
         "field": field,
         "active_norm": active_norm,
         "active_method": active_result.get("method"),
+        "forbidden_grid": forbidden_grid,
+        "forbidden_stats": forbidden_stats,
+        "forbidden_error": forbidden_error,
     }

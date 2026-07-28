@@ -33,6 +33,14 @@ const DEFAULT_PARAMS = {
   showNeurons: true,
   stepHeights: true,
   freezeX0: true,
+  dotPopulation: 48,
+  dotControlPoints: 12,
+  dotTargetRadius: 0.65,
+  dotMutationScale: 0.9,
+  dotEdgeOffset: 1.0,
+  dotGenerationMs: 850,
+  dotAvoidForbidden: true,
+  dotShowForbidden: true,
 };
 
 const COLORS = {
@@ -48,6 +56,11 @@ const COLORS = {
   clickGlow: [255, 176, 80, 50],
   anchor: [180, 140, 255],
   anchorGlow: [180, 140, 255, 55],
+  dotAgent: [88, 185, 255],
+  dotChampion: [80, 255, 140],
+  dotEnemy: [255, 176, 80],
+  dotUnreachable: [255, 90, 90],
+  dotForbidden: [255, 55, 75],
   approx: [80, 255, 140],
   approxGlow: [80, 255, 140, 35],
   panelText: [210, 210, 220],
@@ -75,6 +88,13 @@ let copyBtnEl;
 let captureBtnEl;
 let bgImage = null;
 let isCapturing = false;
+let dotPoints = [];
+let dotEvolution = null;
+let dotRunning = false;
+let dotGenerationStartedAt = 0;
+let forbiddenGrid = null;
+let forbiddenStats = null;
+let forbiddenError = null;
 
 function setup() {
   const cnv = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -94,6 +114,9 @@ function draw() {
   drawAxes();
   if (params.inputMode === "click") {
     drawClickMode();
+  } else if (params.inputMode === "dot") {
+    updateDotEvolution();
+    drawDotMode();
   } else {
     drawCurve();
     drawSamplePoints();
@@ -175,36 +198,70 @@ function buildControlsPanel() {
     }
   }
 
-  const modeSpecificControls =
-    params.inputMode === "click"
-      ? `
+  let modeSpecificControls = "";
+  if (params.inputMode === "click") {
+    modeSpecificControls = `
     <p class="note">1st click — <strong>active soldier</strong> (purple <strong>A</strong>). Then place targets in click order. Click <strong>left</strong> of the previous point → vertical segment. Formula has no <code>y=</code> prefix. <strong>Ctrl+Z</strong> / right-click / Backspace — undo last point.</p>
     <button id="btn-undo-click" type="button" class="secondary">Undo last click</button>
-  `
-      : `
+  `;
+  } else if (params.inputMode === "dot") {
+    modeSpecificControls = `
+    <div class="dot-mode-section">
+      <p class="note">1st click — active soldier. Other clicks are unordered enemy targets. Evolution always moves right; targets left of A are marked unreachable.</p>
+      ${controlSlider("dotPopulation", "Population", 12, 120, 1, params.dotPopulation, 0)}
+      ${controlSlider("dotControlPoints", "Control points", 4, 24, 1, params.dotControlPoints, 0)}
+      ${controlSlider("dotTargetRadius", "Hit radius", 0.2, 1.5, 0.05, params.dotTargetRadius, 2)}
+      ${controlSlider("dotMutationScale", "Mutation scale", 0.1, 2.5, 0.05, params.dotMutationScale, 2)}
+      ${controlSlider("dotEdgeOffset", "Edge penalty offset", 0, 4, 0.1, params.dotEdgeOffset, 1)}
+      ${controlSlider("dotGenerationMs", "Generation time (ms)", 250, 2000, 50, params.dotGenerationMs, 0)}
+      ${controlCheckbox("dotAvoidForbidden", "Avoid detected black zones", params.dotAvoidForbidden)}
+      ${controlCheckbox("dotShowForbidden", "Show forbidden-mask overlay", params.dotShowForbidden)}
+      <div class="dot-actions">
+        <button id="btn-dot-start" type="button">Start evolution</button>
+        <button id="btn-dot-stop" type="button" class="secondary">Stop</button>
+        <button id="btn-dot-undo" type="button" class="secondary">Undo point</button>
+        <button id="btn-dot-clear" type="button" class="secondary">Clear points</button>
+      </div>
+    </div>
+  `;
+  } else {
+    modeSpecificControls = `
     <div class="draw-mode-section">
       ${controlDrawMethodPicker()}
       ${controlSlider("sampleStep", "Dataset step", 0.1, 2, 0.05, params.sampleStep, 2)}
       ${drawMethodControls}
     </div>
   `;
+  }
 
-  const legendHtml =
-    params.inputMode === "click"
-      ? `
+  let legendHtml = "";
+  if (params.inputMode === "click") {
+    legendHtml = `
     <p class="legend">
       <span class="swatch anchor"></span> active (A)
       <span class="swatch click"></span> targets
       <span class="swatch approx"></span> segments
     </p>
-  `
-      : `
+  `;
+  } else if (params.inputMode === "dot") {
+    legendHtml = `
+    <p class="legend">
+      <span class="swatch anchor"></span> active
+      <span class="swatch enemy"></span> enemies
+      <span class="swatch agent"></span> population
+      <span class="swatch champion"></span> champion
+      <span class="swatch forbidden"></span> forbidden
+    </p>
+  `;
+  } else {
+    legendHtml = `
     <p class="legend">
       <span class="swatch target"></span> target curve
       <span class="swatch approx"></span> approximation
       <span class="swatch sample"></span> training
     </p>
   `;
+  }
 
   controlsEl.innerHTML = `
     <h2>Parameters</h2>
@@ -242,6 +299,14 @@ function buildControlsPanel() {
   if (undoClickBtn) {
     undoClickBtn.addEventListener("click", () => undoLastClick());
   }
+  const dotStartBtn = document.getElementById("btn-dot-start");
+  if (dotStartBtn) dotStartBtn.addEventListener("click", startDotEvolution);
+  const dotStopBtn = document.getElementById("btn-dot-stop");
+  if (dotStopBtn) dotStopBtn.addEventListener("click", stopDotEvolution);
+  const dotUndoBtn = document.getElementById("btn-dot-undo");
+  if (dotUndoBtn) dotUndoBtn.addEventListener("click", undoLastDotPoint);
+  const dotClearBtn = document.getElementById("btn-dot-clear");
+  if (dotClearBtn) dotClearBtn.addEventListener("click", clearDotPoints);
   document.getElementById("btn-reset").addEventListener("click", resetParams);
   copyBtnEl = document.getElementById("btn-copy-formula");
   copyBtnEl.addEventListener("click", (event) => {
@@ -259,6 +324,7 @@ function buildControlsPanel() {
   updateCopyButton();
   updateCaptureButton();
   updateStatusPanel();
+  updateDotButtons();
 }
 
 function controlInputModePicker() {
@@ -273,6 +339,10 @@ function controlInputModePicker() {
         <label class="mode-option">
           <input type="radio" name="inputMode" data-param="inputMode" value="draw" ${params.inputMode === "draw" ? "checked" : ""} />
           <span>2. Draw mode</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="inputMode" data-param="inputMode" value="dot" ${params.inputMode === "dot" ? "checked" : ""} />
+          <span>3. Dot mode</span>
         </label>
       </div>
     </div>
@@ -361,7 +431,10 @@ function formatParam(key, value, decimals) {
     key === "taylorHiddenSize" ||
     key === "fourierHarmonics" ||
     key === "fourierHiddenLayers" ||
-    key === "fourierHiddenSize"
+    key === "fourierHiddenSize" ||
+    key === "dotPopulation" ||
+    key === "dotControlPoints" ||
+    key === "dotGenerationMs"
   ) {
     return String(Math.round(value));
   }
@@ -428,6 +501,16 @@ function onParamChange(event) {
   if (changedKey === "inputMode" && params.inputMode !== prevInputMode) {
     clearWorkspaceState();
     buildControlsPanel();
+    return;
+  }
+
+  if (params.inputMode === "dot") {
+    if (newValue !== prevValue && changedKey !== "dotShowForbidden") {
+      resetDotEvolutionEngine();
+    }
+    updateStatusPanel();
+    updateCopyButton();
+    updateDotButtons();
     return;
   }
 
@@ -636,6 +719,296 @@ function drawClickModeHint() {
   text("Then click targets; click left of previous → vertical segment", cx, 34);
 }
 
+function dotConfigFromParams() {
+  const ignoredPoints = dotPoints.map((point) => ({ ...point }));
+  const constraintEvaluators =
+    params.dotAvoidForbidden && forbiddenGrid
+      ? [(path) => forbiddenGrid.pathPenalty(path, ignoredPoints, 0.55)]
+      : [];
+  return {
+    populationSize: params.dotPopulation,
+    controlPoints: params.dotControlPoints,
+    targetRadius: params.dotTargetRadius,
+    mutationScale: params.dotMutationScale,
+    edgeOffset: params.dotEdgeOffset,
+    yMin: Y_MIN,
+    yMax: Y_MAX,
+    xMax: X_MAX,
+    constraintEvaluators,
+  };
+}
+
+function startDotEvolution() {
+  readParamsFromUI();
+  if (dotPoints.length < 2) return;
+  if (params.dotAvoidForbidden && !forbiddenGrid) {
+    alert(
+      forbiddenError ||
+        "Forbidden mask is not loaded.\nRestart the Python server and press Capture field again, or disable “Avoid detected black zones”."
+    );
+    return;
+  }
+  dotEvolution = new DotEvolution(dotPoints[0], dotPoints.slice(1), dotConfigFromParams());
+  dotRunning = true;
+  dotGenerationStartedAt = millis();
+  updateStatusPanel();
+  updateCopyButton();
+  updateDotButtons();
+}
+
+function stopDotEvolution() {
+  dotRunning = false;
+  updateStatusPanel();
+  updateDotButtons();
+}
+
+function resetDotEvolutionEngine() {
+  dotRunning = false;
+  dotEvolution = null;
+  dotGenerationStartedAt = 0;
+  updateStatusPanel();
+  updateCopyButton();
+  updateDotButtons();
+}
+
+function updateDotEvolution() {
+  if (!dotRunning || !dotEvolution) return;
+  if (millis() - dotGenerationStartedAt < params.dotGenerationMs) return;
+  dotEvolution.evolve();
+  dotGenerationStartedAt = millis();
+  updateStatusPanel();
+  updateCopyButton();
+}
+
+function updateDotButtons() {
+  const startBtn = document.getElementById("btn-dot-start");
+  const stopBtn = document.getElementById("btn-dot-stop");
+  const undoBtn = document.getElementById("btn-dot-undo");
+  const clearBtn = document.getElementById("btn-dot-clear");
+  if (startBtn) {
+    startBtn.disabled = dotPoints.length < 2;
+    startBtn.textContent = dotEvolution ? "Restart evolution" : "Start evolution";
+  }
+  if (stopBtn) stopBtn.disabled = !dotRunning;
+  if (undoBtn) undoBtn.disabled = dotPoints.length === 0;
+  if (clearBtn) clearBtn.disabled = dotPoints.length === 0;
+}
+
+function addDotPointAtMouse() {
+  const world = screenToWorld(mouseX, mouseY);
+  dotPoints.push({
+    x: constrain(world.x, X_MIN, X_MAX),
+    y: constrain(world.y, Y_MIN, Y_MAX),
+  });
+  resetDotEvolutionEngine();
+  updateStatusPanel();
+  updateDotButtons();
+}
+
+function undoLastDotPoint() {
+  if (dotPoints.length === 0) return;
+  dotPoints.pop();
+  resetDotEvolutionEngine();
+}
+
+function clearDotPoints() {
+  dotPoints = [];
+  resetDotEvolutionEngine();
+}
+
+function drawDotMode() {
+  const duration = Math.max(1, params.dotGenerationMs);
+  const rawProgress = dotRunning
+    ? constrain((millis() - dotGenerationStartedAt) / (duration * 0.78), 0, 1)
+    : 1;
+  const progress = 1 - Math.pow(1 - rawProgress, 3);
+
+  drawDotEdgeOffsetLines();
+  if (params.dotShowForbidden && forbiddenGrid) drawForbiddenGridOverlay();
+  if (dotEvolution) drawDotPopulation(progress);
+  drawDotMarkers();
+  drawDotOverlay();
+
+  if (dotPoints.length === 0) drawDotModeHint();
+}
+
+function drawDotEdgeOffsetLines() {
+  const offset = params.dotEdgeOffset;
+  if (offset <= 0) return;
+  const lowerLine = Y_MIN + offset;
+  const upperLine = Y_MAX - offset;
+  stroke(COLORS.dotUnreachable[0], COLORS.dotUnreachable[1], COLORS.dotUnreachable[2], 105);
+  strokeWeight(1);
+  drawingContext.setLineDash([7, 7]);
+  lineWorld(X_MIN, lowerLine, X_MAX, lowerLine);
+  lineWorld(X_MIN, upperLine, X_MAX, upperLine);
+  drawingContext.setLineDash([]);
+}
+
+function drawForbiddenGridOverlay() {
+  const payload = forbiddenGrid.payload;
+  noStroke();
+  fill(COLORS.dotForbidden[0], COLORS.dotForbidden[1], COLORS.dotForbidden[2], 38);
+  for (let row = 0; row < payload.rows_rle.length; row++) {
+    const y = (row * payload.cell_px * height) / payload.image_height;
+    const cellHeight = (payload.cell_px * height) / payload.image_height + 0.35;
+    for (const [start, length] of payload.rows_rle[row]) {
+      const x = (start * payload.cell_px * width) / payload.image_width;
+      const runWidth = (length * payload.cell_px * width) / payload.image_width + 0.35;
+      rect(x, y, runWidth, cellHeight);
+    }
+  }
+}
+
+function drawDotPopulation(progress) {
+  const population = dotEvolution.population;
+  for (let index = population.length - 1; index >= 1; index--) {
+    const quality = 1 - index / Math.max(1, population.length - 1);
+    const alpha = 11 + quality * 34;
+    stroke(COLORS.dotAgent[0], COLORS.dotAgent[1], COLORS.dotAgent[2], alpha);
+    strokeWeight(0.7 + quality * 0.5);
+    noFill();
+    drawPartialDotPath(population[index].path, progress);
+
+    if (index < 11 && progress > 0.015) {
+      const head = pointOnDotPath(population[index].path, progress);
+      const screen = worldToScreen(head.x, head.y);
+      noStroke();
+      fill(COLORS.dotAgent[0], COLORS.dotAgent[1], COLORS.dotAgent[2], 55 + quality * 80);
+      circle(screen.x, screen.y, 2.5 + quality * 1.5);
+    }
+  }
+
+  const champion = population[0];
+  if (!champion) return;
+  noFill();
+  stroke(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 45);
+  strokeWeight(7);
+  drawPartialDotPath(champion.path, progress);
+  stroke(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 235);
+  strokeWeight(2.3);
+  drawPartialDotPath(champion.path, progress);
+
+  if (progress > 0.015) {
+    const head = pointOnDotPath(champion.path, progress);
+    const screen = worldToScreen(head.x, head.y);
+    noStroke();
+    fill(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 55);
+    circle(screen.x, screen.y, 15);
+    fill(...COLORS.dotChampion);
+    circle(screen.x, screen.y, 6);
+  }
+}
+
+function drawPartialDotPath(path, progress) {
+  if (!path || path.length < 2 || progress <= 0) return;
+  const position = constrain(progress, 0, 1) * (path.length - 1);
+  const fullSegments = Math.floor(position);
+  const remainder = position - fullSegments;
+  beginShape();
+  for (let i = 0; i <= fullSegments && i < path.length; i++) {
+    const screen = worldToScreen(path[i].x, path[i].y);
+    vertex(screen.x, screen.y);
+  }
+  if (fullSegments < path.length - 1 && remainder > 1e-6) {
+    const left = path[fullSegments];
+    const right = path[fullSegments + 1];
+    const x = left.x + (right.x - left.x) * remainder;
+    const y = left.y + (right.y - left.y) * remainder;
+    const screen = worldToScreen(x, y);
+    vertex(screen.x, screen.y);
+  }
+  endShape();
+}
+
+function pointOnDotPath(path, progress) {
+  const position = constrain(progress, 0, 1) * (path.length - 1);
+  const index = Math.min(path.length - 2, Math.floor(position));
+  const t = Math.min(1, position - index);
+  return {
+    x: path[index].x + (path[index + 1].x - path[index].x) * t,
+    y: path[index].y + (path[index + 1].y - path[index].y) * t,
+  };
+}
+
+function drawDotMarkers() {
+  if (dotPoints.length === 0) return;
+  const start = dotPoints[0];
+  const radiusPx = (params.dotTargetRadius * width) / (X_MAX - X_MIN);
+  const bestDistances = dotEvolution?.bestEver?.fitness?.targetDistances ?? [];
+
+  noStroke();
+  textSize(11);
+  textAlign(CENTER, CENTER);
+  for (let index = 1; index < dotPoints.length; index++) {
+    const target = dotPoints[index];
+    const screen = worldToScreen(target.x, target.y);
+    const unreachable = target.x < start.x - params.dotTargetRadius;
+    const hit = bestDistances[index - 1] <= params.dotTargetRadius;
+    const color = unreachable
+      ? COLORS.dotUnreachable
+      : hit
+        ? COLORS.dotChampion
+        : COLORS.dotEnemy;
+    const pulse = 1 + Math.sin(frameCount * 0.08 + index) * 0.08;
+
+    fill(color[0], color[1], color[2], 22);
+    circle(screen.x, screen.y, radiusPx * 2 * pulse);
+    fill(color[0], color[1], color[2], 54);
+    circle(screen.x, screen.y, 20);
+    fill(...color);
+    circle(screen.x, screen.y, 10);
+    fill(20, 20, 24);
+    text(unreachable ? "!" : String(index), screen.x, screen.y);
+  }
+
+  const anchor = worldToScreen(start.x, start.y);
+  fill(...COLORS.anchorGlow);
+  circle(anchor.x, anchor.y, 24);
+  fill(...COLORS.anchor);
+  circle(anchor.x, anchor.y, 12);
+  fill(20, 20, 24);
+  text("A", anchor.x, anchor.y);
+}
+
+function drawDotOverlay() {
+  if (!dotEvolution) return;
+  const best = dotEvolution.bestEver.fitness;
+  noStroke();
+  fill(...COLORS.panelText);
+  textAlign(LEFT, TOP);
+  textSize(12);
+  const phase = dotRunning ? "evolving" : "paused";
+  text(`generation ${dotEvolution.generation}  •  ${phase}`, 12, 12);
+  fill(...COLORS.dotChampion);
+  text(
+    `champion: ${best.hits}/${dotEvolution.targets.length} hits  •  miss ${roundCoord(best.missDistance)}`,
+    12,
+    29
+  );
+  fill(
+    ...(best.constraintPenalty > 0 ? COLORS.dotUnreachable : COLORS.dotChampion)
+  );
+  text(
+    best.constraintPenalty > 0
+      ? `forbidden collision penalty ${roundCoord(best.constraintPenalty)}`
+      : "trajectory is clear of the detected mask",
+    12,
+    46
+  );
+}
+
+function drawDotModeHint() {
+  noStroke();
+  fill(...COLORS.panelText);
+  textSize(13);
+  textAlign(CENTER, TOP);
+  text("1st click — active soldier (A)", width / 2, 14);
+  textSize(11);
+  fill(...COLORS.axisLabel);
+  text("Then place enemy targets and start evolution", width / 2, 34);
+}
+
 function drawNetworkOverlay() {
   if (params.inputMode !== "draw" || trainingData.length === 0) return;
 
@@ -694,6 +1067,39 @@ function updateStatusPanel() {
     const segments = Math.max(0, clickWaypoints.length - 1);
     const targets = Math.max(0, clickPoints.length - 1);
     statusMseEl.textContent = `active (A): ${clickPoints.length > 0 ? "yes" : "no"}  |  targets: ${targets}  |  segments: ${segments}`;
+    return;
+  }
+
+  if (params.inputMode === "dot") {
+    const targets = Math.max(0, dotPoints.length - 1);
+    const start = dotPoints[0];
+    const unreachable = start
+      ? dotPoints.slice(1).filter((target) => target.x < start.x - params.dotTargetRadius).length
+      : 0;
+    if (!dotEvolution) {
+      const maskState = forbiddenError
+        ? `mask error: ${forbiddenError}`
+        : forbiddenStats
+          ? `mask cells: ${forbiddenStats.grid_forbidden_cells}`
+          : "mask: capture field first";
+      statusMseEl.textContent =
+        `active (A): ${start ? "yes" : "no"}  |  targets: ${targets}` +
+        `  |  ${maskState}` +
+        (unreachable > 0 ? `  |  unreachable: ${unreachable}` : "");
+      return;
+    }
+    const best = dotEvolution.bestEver.fitness;
+    const state = dotRunning ? "running" : "paused";
+    const collisionState =
+      best.constraintPenalty > 0 ? `blocked ${roundCoord(best.constraintPenalty)}` : "safe";
+    statusMseEl.textContent =
+      `${state}  |  generation: ${dotEvolution.generation}` +
+      `  |  hits: ${best.hits}/${targets}` +
+      `  |  obstacles: ${collisionState}` +
+      `  |  miss: ${roundCoord(best.missDistance)}` +
+      `  |  edge: ${roundCoord(best.edgePenalty)}` +
+      `  |  smoothness: ${roundCoord(best.roughness)}` +
+      (unreachable > 0 ? `  |  unreachable: ${unreachable}` : "");
     return;
   }
 
@@ -793,8 +1199,13 @@ function clearWorkspaceState() {
   approxXMin = null;
   approxXMax = null;
   isDrawing = false;
+  dotPoints = [];
+  dotRunning = false;
+  dotEvolution = null;
+  dotGenerationStartedAt = 0;
   updateStatusPanel();
   updateCopyButton();
+  updateDotButtons();
 }
 
 function mergeByX(points) {
@@ -932,6 +1343,12 @@ function getActiveFormulaText() {
     return clickFormulaText(clickWaypoints);
   }
 
+  if (params.inputMode === "dot") {
+    const path = dotEvolution?.bestEver?.path;
+    if (!path || path.length < 2) return null;
+    return clickFormulaText(path);
+  }
+
   if (trainingData.length < 2) return null;
   let formula = null;
   if (params.approxMethod === "linear") {
@@ -962,13 +1379,25 @@ function logActiveFormula() {
     }
     return;
   }
-  const label = params.inputMode === "click" ? "click mode" : methodLabel();
+  const label =
+    params.inputMode === "click"
+      ? "click mode"
+      : params.inputMode === "dot"
+        ? "dot mode"
+        : methodLabel();
   const mse =
-    params.inputMode === "click" || params.approxMethod === "linear"
+    params.inputMode === "click" ||
+    params.inputMode === "dot" ||
+    params.approxMethod === "linear"
       ? formatMse(linearMse)
       : formatMse(network?.mse);
   if (params.inputMode === "click") {
     console.log(`[${label}] segments: ${Math.max(0, clickWaypoints.length - 1)}`);
+  } else if (params.inputMode === "dot") {
+    const best = dotEvolution?.bestEver?.fitness;
+    console.log(
+      `[${label}] generation: ${dotEvolution?.generation ?? 0}, hits: ${best?.hits ?? 0}/${Math.max(0, dotPoints.length - 1)}`
+    );
   } else {
     console.log(`[${label}] MSE = ${mse}`);
   }
@@ -1026,6 +1455,25 @@ async function captureGameField() {
     });
 
     clearWorkspaceState();
+    forbiddenGrid = data.forbidden_grid ? new ForbiddenGrid(data.forbidden_grid) : null;
+    forbiddenStats = data.forbidden_stats ?? null;
+    forbiddenError =
+      data.forbidden_error ||
+      (data.forbidden_grid
+        ? null
+        : "Capture response has no forbidden grid. Restart the Python server.");
+    if (forbiddenStats) {
+      console.info(
+        `[forbidden mask] components=${forbiddenStats.components}, cells=${forbiddenStats.grid_forbidden_cells}/${forbiddenStats.grid_total_cells}`
+      );
+    }
+    if (forbiddenError) {
+      console.warn(`[forbidden mask] ${forbiddenError}`);
+      alert(
+        `${forbiddenError}\n\nStop the current server, run python tools/approximator_server.py again, then press Capture field.`
+      );
+    }
+    updateStatusPanel();
   } catch {
     alert(
       "Capture server unavailable.\nRun: python tools/approximator_server.py\nThen open http://127.0.0.1:8765/"
@@ -1169,6 +1617,15 @@ function mousePressed() {
     return;
   }
 
+  if (params.inputMode === "dot") {
+    if (mouseButton === RIGHT) {
+      undoLastDotPoint();
+      return false;
+    }
+    if (mouseButton === LEFT) addDotPointAtMouse();
+    return;
+  }
+
   isDrawing = true;
   drawnPoints = [];
   mergedWaypoints = [];
@@ -1223,10 +1680,31 @@ function keyPressed() {
     return false;
   }
 
+  if (
+    params.inputMode === "dot" &&
+    (keyCode === BACKSPACE || keyCode === DELETE || isUndoShortcut())
+  ) {
+    undoLastDotPoint();
+    return false;
+  }
+
+  if (params.inputMode === "dot" && key === " ") {
+    if (dotRunning) {
+      stopDotEvolution();
+    } else {
+      startDotEvolution();
+    }
+    return false;
+  }
+
   if (key === "c" || key === "C" || key === "с" || key === "С") {
     if (params.inputMode === "click") {
       clearWorkspaceState();
       updateStatusPanel();
+      return false;
+    }
+    if (params.inputMode === "dot") {
+      clearDotPoints();
       return false;
     }
     drawnPoints = [];

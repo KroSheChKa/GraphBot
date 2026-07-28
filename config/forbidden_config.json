@@ -1,0 +1,14 @@
+{
+  "forbidden": {
+    "black_gray_high": 9,
+    "open_kernel": 5,
+    "close_kernel": 0,
+    "close_iterations": 1,
+    "min_component_area": 29,
+    "player_padding": 1,
+    "use_player_filter": 1,
+    "safety_margin_px": 4,
+    "grid_cell_px": 3,
+    "grid_min_fill_pct": 0
+  }
+}

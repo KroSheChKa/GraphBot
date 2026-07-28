@@ -52,6 +52,7 @@ class ApproximatorHandler(BaseHTTPRequestHandler):
 
         self.send_response(200)
         self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -78,6 +79,18 @@ class ApproximatorHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
             return
+
+        if result.get("ok"):
+            stats = result.get("forbidden_stats")
+            if stats:
+                print(
+                    "[forbidden mask] "
+                    f"components={stats['components']} "
+                    f"cells={stats['grid_forbidden_cells']}/"
+                    f"{stats['grid_total_cells']}"
+                )
+            elif result.get("forbidden_error"):
+                print(f"[forbidden mask] ERROR: {result['forbidden_error']}")
 
         status = 200 if result.get("ok") else 400
         self._send_json(status, result)

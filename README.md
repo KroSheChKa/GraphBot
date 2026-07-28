@@ -2,9 +2,9 @@
 
 > A passion project for [Graphwar](https://github.com/catabriga/graphwar) — turn what you see on the battlefield into a paste-ready mathematical function.
 
-GraphBot watches the game field and builds Graphwar-compatible formulas. The **recommended workflow** is the local **web UI** (`approximator_server.py`) — **Click mode** (default) and **Draw mode** with four approximation methods. **`GraphBot.py`** still offers click mode (OpenCV overlay) and an **automatic mode** prototype that is **not production-ready yet**.
+GraphBot watches the game field and builds Graphwar-compatible formulas. The **recommended workflow** is the local **web UI** (`approximator_server.py`) — **Click mode** (default), **Draw mode** with four approximation methods, and an animated genetic **Dot mode**. **`GraphBot.py`** still offers click mode (OpenCV overlay) and an **automatic mode** prototype that is **not production-ready yet**.
 
-> **Project status:** web UI (click + draw) = ready to use · `GraphBot.py` auto mode = work in progress (see [Auto mode](#auto-mode-work-in-progress))
+> **Project status:** web UI click + draw = ready to use · Dot mode = first playable GA version · `GraphBot.py` auto mode = work in progress (see [Auto mode](#auto-mode-work-in-progress))
 
 > **How GraphBot touches Graphwar:** GraphBot is an **external helper** — it does **not** modify game files, inject into the game process, read game memory, or automate gameplay. The only direct interaction with the Graphwar window is **moving it to a fixed corner** so screen capture aligns with the configured field region. Everything else is: screenshot → math → copy a formula to your clipboard. **You** paste it into Graphwar yourself.
 
@@ -31,6 +31,7 @@ https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
   - [Taylor features (polynomial / beta)](#3-taylor-features-polynomial--beta)
   - [Fourier features (harmonics)](#4-fourier-features-harmonics)
   - [Activation functions (Taylor / Fourier MLP)](#activation-functions-taylor--fourier-mlp)
+- [Dot mode](#dot-mode)
 - [Auto mode (work in progress)](#auto-mode-work-in-progress)
 - [Project layout](#project-layout)
 - [Roadmap](#roadmap)
@@ -102,6 +103,7 @@ Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
 |------|----------------|
 | **1. Click mode** *(default)* | Place waypoints on the canvas; get a piecewise `direct_line` formula |
 | **2. Draw mode** | Sketch a curve, resample to a dataset, approximate with 4 methods |
+| **3. Dot mode** | Place the active soldier and unordered enemies; evolve a population of left-to-right trajectories |
 
 ### Shared controls
 
@@ -112,7 +114,7 @@ Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
 | Copy formula | **Copy y** |
 | Reset sliders & canvas state | **Reset** |
 
-**After «Capture field»:** any previous clicks or drawn curve are cleared automatically — you start fresh on the new screenshot.
+**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot.
 
 ### Click mode (web UI)
 
@@ -154,14 +156,14 @@ Taylor and Fourier methods with **≥ 1 hidden layer** use a small MLP on featur
 flowchart LR
   GW[Graphwar window] --> CAP[Screen capture]
   CAP --> DET[Player / obstacle detection]
-  DET --> PATH[Waypoints or drawn curve]
+  DET --> PATH[Waypoints, drawn curve, or evolved population]
   PATH --> FMT[Graphwar formula]
   FMT --> CLIP[Clipboard]
 ```
 
 1. **Capture** — crop the game field via Win32 window rect + margins from `config/capture_config.json`.
 2. **Detect** — find allies, enemies, active player (red glow), and black obstacles (OpenCV + Hough) *on the screenshot only*.
-3. **Plan** — build waypoints (click mode) or freehand draw + resample (draw mode). *(Auto planners in `GraphBot.py` — A*, polynomial search, symbolic GA — are experimental.)*
+3. **Plan** — build waypoints (click), freehand draw + resample (draw), or evolve left-to-right control-point paths (dot). *(Auto planners in `GraphBot.py` — A*, polynomial search, symbolic GA — are experimental.)*
 4. **Encode** — convert segments or approximations into Graphwar syntax and copy to clipboard.
 
 ### External tool only (no game tampering)
@@ -435,6 +437,79 @@ Leaky ReLU uses the same trick: $\max(0,z) + \alpha\min(0,z)$ is written with `a
 
 ---
 
+## Dot mode
+
+Dot mode is the animated genetic-search workflow in the web UI:
+
+1. Switch to **3. Dot mode**.
+2. Click the active soldier first (**A**), then click enemy targets in any order.
+3. Press **Start evolution** and watch each population grow from A across the field.
+4. Stop when satisfied and use **Copy y** to copy the best agent as a Graphwar piecewise-line expression.
+
+Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`, so agents remain left-to-right mathematical functions. Selection is lexicographic: maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer smoother and shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
+
+| Control | Effect |
+|---------|--------|
+| **Population** | Number of visible agents per generation |
+| **Control points** | Genome/path resolution and exported segment count |
+| **Hit radius** | Circle around each enemy that counts as a hit |
+| **Mutation scale** | Size of random changes between generations |
+| **Edge penalty offset** | Places neutral-zone lines inward from `y = ±15`; only trajectory samples beyond them are penalized |
+| **Generation time** | How long one animated generation remains on screen |
+
+Blue trails are the current population; the green trail is the current champion. Right-click, Backspace, or Ctrl+Z removes the last point; Space toggles evolution. Targets left of A are marked as unreachable because this first version never moves backward in `x`.
+
+### Dot mode in action
+
+<p align="center">
+  <img src="docs/images/dot-mode-example.png" alt="Dot mode genetic algorithm planning a safe trajectory through all targets" width="900" />
+</p>
+
+<p align="center"><em>1. Planner result — the evolved champion hits all targets while avoiding the detected forbidden mask.</em></p>
+
+<p align="center">
+  <img src="docs/images/GA-ingame.jpg" alt="Dot mode trajectory fired in Graphwar" width="760" />
+</p>
+
+<p align="center"><em>2. In-game result — the exported piecewise function reproduced the planned trajectory in Graphwar.</em></p>
+
+After **Capture field**, Python extracts a raster forbidden-mask from black pixels, removes detected players and thin graph strokes, adds a safety margin, and sends a compact occupancy grid to the browser. Dot mode shows it as a translucent red overlay. Safe agents lexicographically outrank every colliding agent; hit count and missed-target distance still outrank the edge-strip penalty, so a necessary border route remains available.
+
+### Forbidden-mask configurator
+
+Tune and inspect the exact data used by Dot mode:
+
+```powershell
+python tools/calibrate_forbidden_mask.py
+```
+
+You can also open a saved field image:
+
+```powershell
+python tools/calibrate_forbidden_mask.py path\to\field.png
+```
+
+The dashboard keeps four views together:
+
+1. Original field with final forbidden area in red.
+2. Raw pixels accepted by the black threshold.
+3. Clean connected areas in green plus the safety expansion in red.
+4. The exact occupancy grid transferred to JavaScript.
+
+| Key | Action |
+|-----|--------|
+| **Space** | Freeze/unfreeze the current live field |
+| **F** | Toggle removal of detected players |
+| **S** | Save `config/forbidden_config.json` |
+| **D** | Export source, intermediate masks, dashboard and JSON report to `outputs/` |
+| **R** | Restore default mask parameters |
+
+The raster mask is the collision source of truth: overlapping or nested circles may merge into one connected area without losing their forbidden pixels. Hough circle reconstruction is not used by Dot mode.
+
+> **Current boundary:** player filtering still depends partly on the existing player-circle detector. Dot mode additionally ignores a small area around manually clicked A/enemy points so imperfect player removal does not make valid hits impossible.
+
+---
+
 ## Auto mode (work in progress)
 
 > **Status: in development.** Auto mode is not the main focus of the project yet. Core pieces exist (screen capture, player detection, preview overlay, prototype planners), but gameplay-critical behavior is still missing or unreliable — teammate filtering, accurate enemy radius, black-circle avoidance, and stable active-player detection are all on the [roadmap](#roadmap).
@@ -483,11 +558,12 @@ GraphBot/
 ├── core/                    # Capture, detection, pathfinding, planners
 ├── config/                  # JSON configs (capture, players, obstacles)
 ├── tools/
-│   ├── approximator_server.py   # Web UI server (click + draw modes)
+│   ├── approximator_server.py   # Web UI server (click + draw + dot modes)
+│   ├── calibrate_forbidden_mask.py # Raster forbidden-area dashboard
 │   ├── preview_capture.py       # Debug capture region
 │   └── calibrate_*.py           # Tune detection parameters
 ├── Visuals in p5.js/
-│   └── universal-approximator/  # Web UI (p5.js + in-browser training)
+│   └── universal-approximator/  # Web UI (p5.js + training + Dot-mode GA)
 ├── docs/images/             # README screenshots (add yours here)
 ├── GAME_RULES.md            # Graphwar rules reference
 ├── TODO.md                  # Detailed dev notes
@@ -500,7 +576,7 @@ GraphBot/
 
 High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in that file.
 
-> **Focus:** most open items below are **auto mode** blockers. Click mode and draw mode are usable today; auto mode should not be expected to play rounds reliably until these land.
+> **Focus:** most open items below are **auto mode** blockers. Click mode and draw mode are usable today; Dot mode is an evolving first version; auto mode should not be expected to play rounds reliably until these land.
 
 ### Auto mode (in development)
 
@@ -517,9 +593,11 @@ High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in
 
 ### Done recently
 
+- [x] **Dot mode v1:** animated populations, lexicographic fitness, start/stop controls, and champion formula export
+- [x] **Dot obstacle avoidance:** calibrated raster mask, compact grid transfer, safety-first GA fitness
 - [x] **Draw mode:** activation picker for Taylor / Fourier MLP (`tanh`, `ReLU`, `Swish`, `GELU`, `Mish`, …)
 - [x] **Graphwar-safe ReLU export** — `max(0,x)` → `(x+|x|)/2` in copied formulas
-- [x] Web UI with **Click mode** (default) + **Draw mode** (4 approximation methods)
+- [x] Web UI with **Click mode** (default) + **Draw mode** (4 approximation methods) + **Dot mode**
 - [x] Click mode: manual soldier (**A**), vertical segments on left-click, formula without `y=`
 - [x] Field capture resets previous clicks / strokes in the web UI
 - [x] Graceful handling when no players are detected (`GraphBot.py`)

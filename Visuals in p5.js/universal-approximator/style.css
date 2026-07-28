@@ -131,6 +131,12 @@ canvas {
   filter: none;
 }
 
+#controls-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+  filter: none;
+}
+
 #btn-capture-field:disabled {
   opacity: 0.65;
   cursor: wait;
@@ -171,6 +177,10 @@ canvas {
 .swatch.sample { background: #64b4ff; }
 .swatch.click { background: #ffb050; }
 .swatch.anchor { background: #b48cff; }
+.swatch.agent { background: #58b9ff; }
+.swatch.champion { background: #50ff8c; }
+.swatch.enemy { background: #ffb050; }
+.swatch.forbidden { background: #ff374b; }
 
 .mode-picker .mode-options,
 .method-picker .method-options {
@@ -200,6 +210,29 @@ canvas {
   border-left: 2px solid #3d7be0;
   background: rgba(61, 123, 224, 0.06);
   border-radius: 0 4px 4px 0;
+}
+
+.dot-mode-section {
+  margin-top: 4px;
+  padding: 10px 10px 8px;
+  border-left: 2px solid #50ff8c;
+  background: rgba(80, 255, 140, 0.055);
+  border-radius: 0 4px 4px 0;
+}
+
+.dot-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dot-actions button {
+  margin-top: 0 !important;
+}
+
+.dot-actions .wide {
+  grid-column: 1 / -1;
 }
 
 .method-picker.nested {
