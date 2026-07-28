@@ -262,10 +262,10 @@ If active-player detection fails, tune `tools/calibrate_active.py`.
 Draw mode lives in the [web UI](#web-ui-recommended) only. Sketch a curve, sample it into a dataset, and approximate with one of four methods.
 
 <p align="center">
-  <img src="docs/images/draw-mode-overview.png" alt="Draw mode — sketch, dataset, and approximation (add screenshot here)" width="720" />
+  <img src="docs/images/draw-mode-example.png" alt="Draw mode building a Fourier approximation from sampled curve points" width="900" />
 </p>
 
-> **Screenshot placeholder:** save your best draw-mode UI capture as `docs/images/draw-mode-overview.png`.
+<p align="center"><em>Draw mode — sampled curve points and the resulting Fourier approximation on a captured Graphwar field.</em></p>
 
 ### From stroke to dataset
 
