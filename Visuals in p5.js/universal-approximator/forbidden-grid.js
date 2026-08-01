@@ -31,9 +31,9 @@ class ForbiddenGrid {
   }
 
   worldToGrid(x, y) {
-    // Matches Python field_to_game(): both axes use field image width as scale.
+    // Matches Python field_to_game(): X and Y use their own image dimensions.
     const pixelX = ((x + 25) * this.imageWidth) / 50;
-    const pixelY = ((15 - y) * this.imageWidth) / 50;
+    const pixelY = ((15 - y) * this.imageHeight) / 30;
     return {
       x: pixelX / this.cellPx,
       y: pixelY / this.cellPx,

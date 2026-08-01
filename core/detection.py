@@ -32,6 +32,8 @@ DEFAULT_ACTIVE_PARAMS = {
     "glow_min_area": 80,
     "match_max_dist": 40,
     "left_side_only": 1,
+    "refine_scale": 10,
+    "review_uncertainty_game": 0.05,
 }
 
 DEFAULT_PLAYERS_PARAMS = {
@@ -139,6 +141,8 @@ def sanitize_active_params(params):
     p["glow_min_area"] = max(0, int(p["glow_min_area"]))
     p["red_excess_thresh"] = max(0, int(p["red_excess_thresh"]))
     p["left_side_only"] = 1 if int(p["left_side_only"]) else 0
+    p["refine_scale"] = max(1, min(20, int(p["refine_scale"])))
+    p["review_uncertainty_game"] = max(0.01, min(1.0, float(p["review_uncertainty_game"])))
     return p
 
 
@@ -261,7 +265,7 @@ def detect_red_glow_mask(bgr, params):
     return mask
 
 
-def glow_centroid(mask, min_area):
+def glow_centroid(mask, min_area, max_x=None):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None, None
@@ -271,6 +275,13 @@ def glow_centroid(mask, min_area):
     for contour in contours:
         area = cv2.contourArea(contour)
         if area >= min_area and area > best_area:
+            if max_x is not None:
+                moments = cv2.moments(contour)
+                if moments["m00"] == 0:
+                    continue
+                centroid_x = moments["m10"] / moments["m00"]
+                if centroid_x > max_x:
+                    continue
             best = contour
             best_area = area
 
@@ -281,9 +292,164 @@ def glow_centroid(mask, min_area):
     if moments["m00"] == 0:
         return None, best_area
 
-    cx = int(moments["m10"] / moments["m00"])
-    cy = int(moments["m01"] / moments["m00"])
+    cx = float(moments["m10"] / moments["m00"])
+    cy = float(moments["m01"] / moments["m00"])
     return (cx, cy), best_area
+
+
+def _fit_circle(points):
+    """Fit a circle to contour points and return center, radius, residual."""
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if len(points) < 6:
+        return None
+
+    x = points[:, 0]
+    y = points[:, 1]
+    matrix = np.column_stack((2.0 * x, 2.0 * y, np.ones_like(x)))
+    values = x * x + y * y
+    try:
+        solution, _, _, _ = np.linalg.lstsq(matrix, values, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+
+    cx, cy, constant = solution
+    radius_squared = constant + cx * cx + cy * cy
+    if radius_squared <= 0 or not np.isfinite(radius_squared):
+        return None
+
+    radius = float(np.sqrt(radius_squared))
+    distances = np.hypot(x - cx, y - cy)
+    residual = float(np.sqrt(np.mean((distances - radius) ** 2)))
+    return float(cx), float(cy), radius, residual
+
+
+def _active_red_contour(glow_mask, center, radius, scale=1):
+    """Find the red component belonging to a player candidate."""
+    cx, cy = center
+    half_size = max(16, int(round(radius * 4.0)))
+    height, width = glow_mask.shape[:2]
+    left = max(0, int(np.floor(cx - half_size)))
+    top = max(0, int(np.floor(cy - half_size)))
+    right = min(width, int(np.ceil(cx + half_size + 1)))
+    bottom = min(height, int(np.ceil(cy + half_size + 1)))
+    roi = glow_mask[top:bottom, left:right]
+    if roi.size == 0:
+        return None
+    scale = max(1, int(scale))
+    if scale > 1:
+        roi = cv2.resize(roi, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        _, roi = cv2.threshold(roi, 127, 255, cv2.THRESH_BINARY)
+
+    contours, _ = cv2.findContours(roi, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    best = None
+    best_score = float("-inf")
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area <= 0:
+            continue
+        moments = cv2.moments(contour)
+        if moments["m00"] == 0:
+            continue
+        local_center = (
+            moments["m10"] / moments["m00"] / scale + left,
+            moments["m01"] / moments["m00"] / scale + top,
+        )
+        distance = float(np.hypot(local_center[0] - cx, local_center[1] - cy))
+        if distance > max(half_size, radius * 2.5):
+            continue
+        score = area / (1.0 + distance)
+        if score > best_score:
+            best = contour.reshape(-1, 2).astype(np.float64) / scale
+            best += np.array([left, top], dtype=np.float64)
+            best_score = score
+    return best
+
+
+def refine_active_center(bgr, glow_mask, active, glow_center, params=None):
+    """Refine a player-circle center while keeping the original pixels authoritative."""
+    params = sanitize_active_params(params or {})
+    cx, cy, radius = (float(value) for value in active)
+    sources = [(cx, cy, 0.55, "player-circle")]
+    if glow_center is not None:
+        gx, gy = (float(value) for value in glow_center)
+        if np.isfinite(gx) and np.isfinite(gy):
+            candidate_gap = float(np.hypot(gx - cx, gy - cy))
+            # A red component is the strongest evidence of the active player.
+            # If Hough picked a nearby UI/obstacle circle, do not let it drag
+            # the anchor away from that red component.
+            if candidate_gap > max(8.0, radius * 1.5):
+                sources = [(gx, gy, 1.0, "red-centroid")]
+            else:
+                sources = [
+                    (cx, cy, 0.40, "player-circle"),
+                    (gx, gy, 0.30, "red-centroid"),
+                ]
+
+    contour = _active_red_contour(
+        glow_mask,
+        (cx, cy),
+        radius,
+        scale=params["refine_scale"],
+    )
+    fit = _fit_circle(contour) if contour is not None else None
+
+    if fit is not None:
+        fit_x, fit_y, fit_radius, fit_residual = fit
+        # The red glow is normally outside the player body. Keep the Hough
+        # radius and use the fitted ring only for center refinement.
+        if np.hypot(fit_x - cx, fit_y - cy) <= max(8.0, radius * 2.0):
+            sources.append((fit_x, fit_y, 0.30, "red-ring"))
+        else:
+            fit = None
+            fit_residual = None
+    else:
+        fit_residual = None
+
+    weight_sum = sum(source[2] for source in sources)
+    refined_x = sum(source[0] * source[2] for source in sources) / weight_sum
+    refined_y = sum(source[1] * source[2] for source in sources) / weight_sum
+    spread = float(
+        np.sqrt(
+            sum(
+                source[2]
+                * ((source[0] - refined_x) ** 2 + (source[1] - refined_y) ** 2)
+                for source in sources
+            )
+            / weight_sum
+        )
+    )
+
+    fit_error = 0.0 if fit_residual is None else min(1.0, fit_residual / max(radius, 1.0))
+    agreement = max(0.0, 1.0 - spread / max(radius * 1.5, 1.0))
+    ring_bonus = 0.25 if fit is not None else 0.0
+    confidence = min(1.0, max(0.0, 0.45 + 0.35 * agreement + ring_bonus - 0.25 * fit_error))
+    uncertainty_px = max(0.35, spread + (fit_residual or 0.0) * 0.25)
+
+    height, width = bgr.shape[:2]
+    uncertainty_x = uncertainty_px * 50.0 / max(1, width)
+    uncertainty_y = uncertainty_px * 30.0 / max(1, height)
+    review_limit = float(params["review_uncertainty_game"])
+    needs_review = (
+        confidence < 0.65
+        or uncertainty_x > review_limit
+        or uncertainty_y > review_limit
+    )
+
+    method = "red-ring+player-circle" if fit is not None else "player-circle+red-glow"
+    return {
+        "center": (refined_x, refined_y),
+        "source_center": (cx, cy),
+        "ring_center": None if fit is None else (float(fit[0]), float(fit[1])),
+        "radius": float(radius),
+        "uncertainty_px": uncertainty_px,
+        "uncertainty_game": {"x": uncertainty_x, "y": uncertainty_y},
+        "confidence": confidence,
+        "needs_review": needs_review,
+        "method": method,
+        "sources": [source[3] for source in sources],
+        "fit_residual_px": fit_residual,
+        "debug_scale": int(params["refine_scale"]),
+    }
 
 
 def filter_uniform_players(circles, params):
@@ -374,7 +540,12 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
 
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
     glow_mask = detect_red_glow_mask(bgr, active_params)
-    glow_center, glow_area = glow_centroid(glow_mask, int(active_params["glow_min_area"]))
+    glow_limit_x = field_width / 2 if active_params["left_side_only"] else None
+    glow_center, glow_area = glow_centroid(
+        glow_mask,
+        int(active_params["glow_min_area"]),
+        max_x=glow_limit_x,
+    )
 
     players, player_mask = detect_player_circles(gray, players_params)
     center_x = field_width / 2
@@ -383,7 +554,7 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
     if players is not None:
         for pt in players[0]:
             cx, cy, r = int(pt[0]), int(pt[1]), int(pt[2])
-            if active_params["left_side_only"] and cx > center_x + r:
+            if active_params["left_side_only"] and cx > center_x:
                 continue
             candidates.append((cx, cy, r))
 
@@ -394,6 +565,10 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
     if glow_center and candidates:
         gx, gy = glow_center
         max_dist = float(active_params["match_max_dist"])
+        # Do not match the red component to a distant Hough circle. In a
+        # crowded field that circle is often a label, obstacle, or another
+        # false positive; the red centroid remains a valid center by itself.
+        max_match_dist = min(max_dist, max(10.0, expected_r * 2.25))
         best = None
         best_score = float("inf")
 
@@ -405,7 +580,7 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
             overlap_ratio = np.count_nonzero(overlap) / overlap.size if overlap.size else 0
             dist = ((cx - gx) ** 2 + (cy - gy) ** 2) ** 0.5
             score = dist - overlap_ratio * 30
-            if dist <= max_dist and score < best_score:
+            if dist <= max_match_dist and score < best_score:
                 best_score = score
                 best = (cx, cy, r)
 
@@ -413,13 +588,11 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
             active = best
             method = "glow+player"
 
-    if active is None and glow_center and candidates:
-        gx, gy = glow_center
-        nearest = min(candidates, key=lambda p: (p[0] - gx) ** 2 + (p[1] - gy) ** 2)
-        active = nearest
-        method = "glow+nearest"
-
     if active is None and glow_center and not candidates:
+        active = (glow_center[0], glow_center[1], expected_r)
+        method = "glow_only"
+
+    if active is None and glow_center and candidates:
         active = (glow_center[0], glow_center[1], expected_r)
         method = "glow_only"
 
@@ -427,9 +600,25 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
         active = min(candidates, key=lambda p: p[0])
         method = "leftmost"
 
+    active_detection = None
+    if active is not None:
+        active_detection = refine_active_center(
+            bgr,
+            glow_mask,
+            active,
+            glow_center,
+            active_params,
+        )
+        if method != "glow+player":
+            active_detection["confidence"] = min(active_detection["confidence"], 0.55)
+            active_detection["needs_review"] = True
+        refined_x, refined_y = active_detection["center"]
+        active = (refined_x, refined_y, active_detection["radius"])
+
     return {
         "active": active,
         "method": method,
+        "active_detection": active_detection,
         "glow_center": glow_center,
         "glow_area": glow_area,
         "players": players,
@@ -453,7 +642,7 @@ def draw_players_overlay(bgr, result, field_width, active=None):
             cx, cy, r = int(pt[0]), int(pt[1]), int(pt[2])
             radii.append(r)
             player = (cx, cy, r)
-            if active_tuple and player == active_tuple:
+            if active_tuple and np.hypot(cx - active_tuple[0], cy - active_tuple[1]) <= max(2, r * 0.35):
                 continue
             side = classify_side(cx, r, field_width)
             color = (0, 120, 255) if side == "enemy" else (255, 200, 0)
@@ -472,12 +661,13 @@ def draw_players_overlay(bgr, result, field_width, active=None):
 
     if active_tuple:
         cx, cy, r = active_tuple
-        cv2.circle(out, (cx, cy), r + 4, (0, 255, 0), 2)
-        cv2.circle(out, (cx, cy), 2, (0, 255, 0), -1)
+        center = (int(round(cx)), int(round(cy)))
+        cv2.circle(out, center, int(round(r)) + 4, (0, 255, 0), 2)
+        cv2.circle(out, center, 2, (0, 255, 0), -1)
         cv2.putText(
             out,
             "ACTIVE",
-            (cx + r + 4, cy - 4),
+            (center[0] + int(round(r)) + 4, center[1] - 4),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.45,
             (0, 255, 0),
@@ -528,25 +718,32 @@ def draw_detection_overlay(bgr, result, field_width):
 
     if result["glow_center"]:
         gx, gy = result["glow_center"]
-        cv2.drawMarker(out, (gx, gy), (0, 0, 255), cv2.MARKER_CROSS, 14, 2)
+        cv2.drawMarker(out, (int(round(gx)), int(round(gy))), (0, 0, 255), cv2.MARKER_CROSS, 14, 2)
 
     if result["players"] is not None:
         for pt in result["players"][0]:
             cx, cy, r = int(pt[0]), int(pt[1]), int(pt[2])
             side = classify_side(cx, r, field_width)
             color = (0, 120, 255) if side == "enemy" else (255, 200, 0)
-            if result["active"] and (cx, cy, r) == result["active"]:
+            if result["active"] and np.hypot(cx - result["active"][0], cy - result["active"][1]) <= max(2, r * 0.35):
                 continue
             cv2.circle(out, (cx, cy), r, color, 1)
             cv2.circle(out, (cx, cy), 2, color, -1)
 
     if result["active"]:
         cx, cy, r = result["active"]
-        cv2.circle(out, (cx, cy), r + 3, (0, 255, 0), 2)
-        cv2.circle(out, (cx, cy), 2, (0, 255, 0), -1)
+        center = (int(round(cx)), int(round(cy)))
+        cv2.circle(out, center, int(round(r)) + 3, (0, 255, 0), 2)
+        cv2.circle(out, center, 2, (0, 255, 0), -1)
         game_x = pixel_to_game_x(cx, field_width)
         game_r = pixel_radius_to_game(r, field_width)
-        label = f"ACTIVE ({result['method']}) x={game_x:.2f} r={game_r:.2f}"
+        detection = result.get("active_detection") or {}
+        confidence = detection.get("confidence")
+        uncertainty = detection.get("uncertainty_game", {}).get("x")
+        extra = ""
+        if confidence is not None:
+            extra = f" conf={confidence:.2f} err≈±{float(uncertainty or 0):.3f}"
+        label = f"ACTIVE ({result['method']}) x={game_x:.2f} r={game_r:.2f}{extra}"
         cv2.putText(
             out, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 1, cv2.LINE_AA
         )

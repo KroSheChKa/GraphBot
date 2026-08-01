@@ -54,16 +54,18 @@ Development plan. Tackle one item at a time, not everything at once.
 
 ## 4. Better active-player detection (auto mode)
 
-**Status:** not started
+**Status:** ✅ implemented for capture and web UI
 
-**Current:** active player = **largest** circle by radius. Unreliable.
+**Current:** the red outline identifies the active-player candidate; the Hough player circle and red-ring geometry refine its center. The capture API returns confidence and measured uncertainty, and the web UI uses the result as a persistent anchor.
 
 **Game hint:** the active character has a **slight red outline**. Can be detected with a color mask / contour.
 
 **Needed:**
-- [ ] Mask for the active player’s red outline (preferred approach).
-- [ ] Fallback heuristics: size, position, difference from teammates/enemies.
-- [ ] Tie into the calibration utility (#11) for threshold tuning.
+- [x] Mask for the active player’s red outline (preferred approach).
+- [x] Fallback heuristics: size, position, difference from teammates/enemies.
+- [x] Tie into the calibration utility (#11) for threshold tuning.
+
+The anchor is retained through mode changes, `C`, and Undo; it changes only on a new capture or manual drag.
 
 ---
 

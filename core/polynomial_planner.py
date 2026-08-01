@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 
 from .avoidance import fmt_game, segment_intersects_circle
+from .field_geometry import game_to_pixel
 
 X_MIN, X_MAX = -25.0, 25.0
 Y_MIN, Y_MAX = -15.0, 15.0
@@ -382,16 +383,17 @@ def search_best_polynomial(
     }
 
 
-def game_to_field_px(gx, gy, field_width):
-    fx = int((gx + 25) * field_width / 50)
-    fy = int((15 - gy) * field_width / 50)
-    return fx, fy
+def game_to_field_px(gx, gy, field_width, field_height=None):
+    field_height = field_height or field_width
+    fx, fy = game_to_pixel(gx, gy, field_width, field_height)
+    return int(fx), int(fy)
 
 
 def draw_polynomial_curve_on_field(
     bgr,
     points,
     field_width,
+    field_height=None,
     color=(0, 255, 0),
     thickness=2,
 ):
@@ -401,7 +403,7 @@ def draw_polynomial_curve_on_field(
     out = bgr.copy()
     poly = []
     for gx, gy in points:
-        fx, fy = game_to_field_px(gx, gy, field_width)
+        fx, fy = game_to_field_px(gx, gy, field_width, field_height)
         poly.append((fx, fy))
 
     for idx in range(len(poly) - 1):

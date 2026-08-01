@@ -12,6 +12,7 @@ import math
 import cv2
 
 from .avoidance import DEFAULT_CLEARANCE, fmt_game, segment_intersects_circle
+from .field_geometry import game_to_pixel
 
 X_MIN, X_MAX = -25.0, 25.0
 Y_MIN, Y_MAX = -15.0, 15.0
@@ -223,17 +224,17 @@ def build_enemy_chain_astar(
     return path, hit, skipped
 
 
-def game_to_field_px(gx, gy, field_width):
-    fx = int((gx + 25) * field_width / 50)
-    fy = int((15 - gy) * field_width / 50)
-    return fx, fy
+def game_to_field_px(gx, gy, field_width, field_height=None):
+    field_height = field_height or field_width
+    fx, fy = game_to_pixel(gx, gy, field_width, field_height)
+    return int(fx), int(fy)
 
 
-def draw_path_on_field(bgr, path_waypoints, field_width):
+def draw_path_on_field(bgr, path_waypoints, field_width, field_height=None):
     if len(path_waypoints) < 2:
         return bgr
     out = bgr.copy()
-    pts = [game_to_field_px(p[0], p[1], field_width) for p in path_waypoints]
+    pts = [game_to_field_px(p[0], p[1], field_width, field_height) for p in path_waypoints]
     for i in range(len(pts) - 1):
         cv2.line(out, pts[i], pts[i + 1], (0, 255, 0), 2)
     for pt in pts:

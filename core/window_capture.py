@@ -2,6 +2,7 @@
 Helpers to capture the Graphwar client area via Win32 (no hardcoded screen coords).
 """
 
+import ctypes
 import json
 from pathlib import Path
 
@@ -17,6 +18,24 @@ DEFAULT_MARGINS = {
     "margin_right": 16,
     "margin_bottom": 135,
 }
+
+
+def _set_process_dpi_awareness():
+    """Keep Win32 window coordinates in the same pixel space as mss."""
+    try:
+        # Match mss: use per-monitor DPI awareness on modern Windows.
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except (AttributeError, OSError):
+        # Fallback for older Windows versions without shcore.dll.
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+
+
+# mss normally sets this when its first capture object is created. Set it before
+# the first GetWindowRect/ClientToScreen call so the first screenshot is aligned.
+_set_process_dpi_awareness()
 
 
 def load_capture_margins(path=CONFIG_PATH):

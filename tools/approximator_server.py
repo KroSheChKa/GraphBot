@@ -3,12 +3,11 @@ Local server for the universal-approximator p5 UI + Graphwar field capture.
 
 Usage:
     python tools/approximator_server.py
-
-Then open http://127.0.0.1:8765/
 """
 
 import json
 import sys
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -21,6 +20,7 @@ from core.game_capture import capture_game_field
 APPROX_DIR = ROOT_DIR / "Visuals in p5.js" / "universal-approximator"
 HOST = "127.0.0.1"
 PORT = 8765
+SERVER_URL = f"http://{HOST}:{PORT}/"
 
 
 class ApproximatorHandler(BaseHTTPRequestHandler):
@@ -101,8 +101,10 @@ def main():
         raise SystemExit(f"Approximator folder not found: {APPROX_DIR}")
 
     httpd = ThreadingHTTPServer((HOST, PORT), ApproximatorHandler)
-    print(f"Approximator server: http://{HOST}:{PORT}/")
+    print(f"Approximator server: {SERVER_URL}")
     print("Graphwar must be running. Use «Capture field» in the UI.")
+    if not webbrowser.open(SERVER_URL, new=2):
+        print("Could not open the default browser automatically.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

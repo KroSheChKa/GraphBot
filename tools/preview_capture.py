@@ -8,6 +8,7 @@ Controls:
   q / Esc  — quit
   s        — print current field dict to console
   r        — reset margins to 0
+  h        — restore the legacy margin hint
 """
 
 import sys
@@ -76,9 +77,23 @@ def _draw_overlay(frame, field, client_left, client_top, client_w, client_h):
 def _annotate_capture(capture_bgr, field):
     out = capture_bgr.copy()
     h, w = out.shape[:2]
+    for game_x in (-25, 0, 25):
+        x = int(round((game_x + 25) * w / 50))
+        color = (0, 180, 0) if game_x == 0 else (90, 90, 90)
+        cv2.line(out, (x, 0), (x, h - 1), color, 1)
+        cv2.putText(out, f"x={game_x}", (max(2, x + 3), 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+    for game_y in (15, 0, -15):
+        y = int(round((15 - game_y) * h / 30))
+        color = (0, 180, 0) if game_y == 0 else (90, 90, 90)
+        cv2.line(out, (0, y), (w - 1, y), color, 1)
+        cv2.putText(out, f"y={game_y}", (4, max(30, y - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
+
+    scale_x = 50 / max(1, w)
+    scale_y = 30 / max(1, h)
     lines = [
         f"capture: {w}x{h}",
         f"screen left={field['left']} top={field['top']}",
+        f"scale: x={scale_x:.4f} game/px  y={scale_y:.4f} game/px",
     ]
     for i, line in enumerate(lines):
         cv2.putText(

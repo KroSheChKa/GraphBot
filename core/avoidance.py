@@ -8,6 +8,8 @@ Output is still a list of game-coordinate waypoints for ``waypoints_to_formula``
 
 import math
 
+from .field_geometry import pixel_radius_to_game, pixel_to_game
+
 GAME_PRECISION = 5
 VERTICAL_MAX_COEFF = 999
 VERTICAL_MIN_EPS = 0.001
@@ -25,13 +27,13 @@ def vertical_eps(y_from, y_to, max_coeff=VERTICAL_MAX_COEFF):
     return max(VERTICAL_MIN_EPS, dy / (2 * max_coeff))
 
 
-def field_obstacles_to_game(obstacles_field, field_width):
+def field_obstacles_to_game(obstacles_field, field_width, field_height=None):
     """Convert field-pixel circles (cx, cy, r) to game coords."""
+    field_height = field_height or field_width
     game = []
     for cx, cy, r in obstacles_field:
-        gx = -25 + cx * 50 / field_width
-        gy = 15 - cy * 50 / field_width
-        gr = r * 50 / field_width
+        gx, gy = pixel_to_game(cx, cy, field_width, field_height)
+        gr = pixel_radius_to_game(r, field_width, field_height)
         game.append((fmt_game(gx), fmt_game(gy), fmt_game(gr)))
     return game
 

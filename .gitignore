@@ -5,3 +5,6 @@ __pycache__/
 # Keep generated artifacts out of git.
 outputs/*
 !outputs/.gitkeep
+
+# Local clean field captures used for manual testing and future datasets.
+/data/field_captures/*

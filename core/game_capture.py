@@ -13,6 +13,8 @@ import win32gui
 
 from core.detection import find_active_player, load_active_params, load_players_params
 from core.forbidden_mask import build_forbidden_mask, load_forbidden_params
+from core.field_geometry import pixel_to_game
+from core.field_capture_archive import save_clean_field_capture
 from core.window_capture import (
     DEFAULT_GAME_WINDOW_NAME,
     find_game_window,
@@ -29,9 +31,8 @@ def fmt_game(value):
     return round(float(value), GAME_PRECISION)
 
 
-def field_to_game(field_x, field_y, field_width):
-    game_x = -25 + field_x * 50 / field_width
-    game_y = 15 - field_y * 50 / field_width
+def field_to_game(field_x, field_y, field_width, field_height):
+    game_x, game_y = pixel_to_game(field_x, field_y, field_width, field_height)
     return fmt_game(game_x), fmt_game(game_y)
 
 
@@ -117,6 +118,16 @@ def capture_game_field(
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)}
 
+    field_archive = None
+    field_archive_error = None
+    try:
+        # Save the exact same raw crop that is sent to the browser. All
+        # detection and visualization happens after this point.
+        field_archive = save_clean_field_capture(bgr)
+    except Exception as exc:
+        # An archive write must never make a usable field capture fail.
+        field_archive_error = str(exc)
+
     active_result = find_active_player(
         bgr,
         field["width"],
@@ -124,11 +135,32 @@ def capture_game_field(
         players_params=load_players_params(),
     )
     active_norm = None
+    active_anchor = None
     active_circle = active_result.get("active")
     if active_circle is not None:
-        cx, cy, _radius = active_circle
-        gx, gy = field_to_game(cx, cy, field["width"])
+        cx, cy, radius = active_circle
+        gx, gy = field_to_game(cx, cy, field["width"], field["height"])
         active_norm = [gx, gy]
+        detection = active_result.get("active_detection") or {}
+        uncertainty_px = float(detection.get("uncertainty_px", 1.0))
+        scale_x = 50.0 / field["width"]
+        scale_y = 30.0 / field["height"]
+        active_anchor = {
+            "pixel": {
+                "x": round(float(cx), 4),
+                "y": round(float(cy), 4),
+                "radius": round(float(radius), 4),
+            },
+            "game": {"x": gx, "y": gy},
+            "confidence": round(float(detection.get("confidence", 0.0)), 4),
+            "uncertainty_px": round(uncertainty_px, 4),
+            "uncertainty_game": {
+                "x": round(uncertainty_px * scale_x, 5),
+                "y": round(uncertainty_px * scale_y, 5),
+            },
+            "method": detection.get("method", active_result.get("method", "unknown")),
+            "needs_review": bool(detection.get("needs_review", True)),
+        }
 
     forbidden_grid = None
     forbidden_stats = None
@@ -151,8 +183,11 @@ def capture_game_field(
         "width": field["width"],
         "height": field["height"],
         "field": field,
+        "field_archive": field_archive,
+        "field_archive_error": field_archive_error,
         "active_norm": active_norm,
         "active_method": active_result.get("method"),
+        "active_anchor": active_anchor,
         "forbidden_grid": forbidden_grid,
         "forbidden_stats": forbidden_stats,
         "forbidden_error": forbidden_error,

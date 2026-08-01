@@ -7,6 +7,7 @@ Live capture from Graphwar, or a static screenshot:
 
 Controls:
   s        — save params to active_config.json
+  d        — save the enlarged active-player debug frame
   r        — reset to defaults
   q / Esc  — quit
 """
@@ -36,6 +37,8 @@ from core.window_capture import find_game_window, get_capture_field, load_captur
 WINDOW = "GraphBot — active player"
 MASK_WINDOW = "red glow mask"
 PLAYER_MASK_WINDOW = "player mask"
+DEBUG_WINDOW = "active player x10"
+DEBUG_SCALE = 10
 
 TRACKBARS = [
     ("red_excess", "red_excess_thresh", 0, 80),
@@ -71,6 +74,65 @@ def _setup_trackbars(initial):
             cv2.setTrackbarPos(trackbar_name, WINDOW, min_val)
 
 
+def _active_debug_frame(bgr, result, scale=DEBUG_SCALE):
+    active = result.get("active")
+    if not active:
+        return np.zeros((240, 420, 3), dtype=np.uint8)
+
+    cx, cy, radius = (float(value) for value in active)
+    padding = max(12, int(round(radius * 3.5)))
+    height, width = bgr.shape[:2]
+    left = max(0, int(np.floor(cx - padding)))
+    top = max(0, int(np.floor(cy - padding)))
+    right = min(width, int(np.ceil(cx + padding + 1)))
+    bottom = min(height, int(np.ceil(cy + padding + 1)))
+
+    crop = bgr[top:bottom, left:right].copy()
+    mask = result["glow_mask"][top:bottom, left:right]
+    tint = np.zeros_like(crop)
+    tint[:, :, 2] = mask
+    crop = cv2.addWeighted(crop, 1.0, tint, 0.45, 0)
+    enlarged = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+
+    center = (int(round((cx - left) * scale)), int(round((cy - top) * scale)))
+    cv2.circle(enlarged, center, int(round(radius * scale)), (0, 255, 0), 2)
+    cv2.drawMarker(enlarged, center, (0, 255, 0), cv2.MARKER_CROSS, 18, 2)
+
+    detection = result.get("active_detection") or {}
+    source_center = detection.get("source_center")
+    if source_center:
+        sx, sy = source_center
+        source = (int(round((sx - left) * scale)), int(round((sy - top) * scale)))
+        cv2.drawMarker(enlarged, source, (0, 255, 255), cv2.MARKER_CROSS, 18, 2)
+
+    ring_center = detection.get("ring_center")
+    if ring_center:
+        rx, ry = ring_center
+        ring = (int(round((rx - left) * scale)), int(round((ry - top) * scale)))
+        cv2.drawMarker(enlarged, ring, (255, 0, 255), cv2.MARKER_TILTED_CROSS, 18, 2)
+
+    glow_center = result.get("glow_center")
+    if glow_center:
+        gx, gy = glow_center
+        glow = (int(round((gx - left) * scale)), int(round((gy - top) * scale)))
+        cv2.drawMarker(enlarged, glow, (0, 0, 255), cv2.MARKER_TILTED_CROSS, 18, 2)
+
+    confidence = float(detection.get("confidence", 0.0))
+    uncertainty = detection.get("uncertainty_game", {}).get("x")
+    label = f"green refined / yellow Hough / magenta ring  conf={confidence:.2f} err=±{float(uncertainty or 0):.3f}"
+    cv2.putText(
+        enlarged,
+        label,
+        (8, max(22, enlarged.shape[0] - 10)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (0, 255, 0),
+        1,
+        cv2.LINE_AA,
+    )
+    return enlarged
+
+
 def _grab_frame(sct, image_path, capture_margins):
     if image_path:
         bgr = cv2.imread(str(image_path))
@@ -94,6 +156,7 @@ def main():
     cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
     cv2.namedWindow(MASK_WINDOW, cv2.WINDOW_NORMAL)
     cv2.namedWindow(PLAYER_MASK_WINDOW, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(DEBUG_WINDOW, cv2.WINDOW_NORMAL)
     _setup_trackbars(initial)
 
     print("Calibrate ACTIVE player (red glow on the left side).")
@@ -103,7 +166,7 @@ def main():
         print(f"Static image: {image_path}")
     else:
         print("Live capture from Graphwar.")
-    print("Keys: s = save active only, r = reset, q/Esc = quit")
+    print("Keys: s = save active only, d = save enlarged debug, r = reset, q/Esc = quit")
 
     with mss.mss() as sct:
         static_frame = None
@@ -155,11 +218,18 @@ def main():
                     break
                 continue
             overlay = draw_detection_overlay(bgr, result, field_width)
+            debug_frame = _active_debug_frame(bgr, result)
 
             info = f"method={result['method']} glow_area={result['glow_area']}"
             if result["active"]:
                 cx, cy, r = result["active"]
                 info += f"  active=({cx},{cy}) r={r}"
+                detection = result.get("active_detection") or {}
+                uncertainty = detection.get("uncertainty_game", {}).get("x")
+                info += (
+                    f"  confidence={detection.get('confidence', 0):.2f}"
+                    f"  error=±{float(uncertainty or 0):.3f}"
+                )
             cv2.putText(
                 overlay,
                 info,
@@ -174,6 +244,7 @@ def main():
             cv2.imshow(WINDOW, overlay)
             cv2.imshow(MASK_WINDOW, result["glow_mask"])
             cv2.imshow(PLAYER_MASK_WINDOW, result["player_mask"])
+            cv2.imshow(DEBUG_WINDOW, debug_frame)
 
             key = cv2.waitKey(30 if static_frame is None else 0) & 0xFF
             if key in (ord("q"), 27):
@@ -182,6 +253,11 @@ def main():
                 path = save_active_params(params)
                 print(f"Saved: {path}")
                 print(params)
+            if key == ord("d"):
+                output_path = ROOT_DIR / "outputs" / "active_debug.png"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(output_path), debug_frame)
+                print(f"Saved: {output_path}")
             if key == ord("r"):
                 for trackbar_name, param_key, _, max_val in TRACKBARS:
                     default = int(DEFAULT_ACTIVE_PARAMS[param_key])

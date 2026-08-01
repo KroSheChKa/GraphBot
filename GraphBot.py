@@ -85,6 +85,7 @@ from core.detection import (
     load_players_params,
 )
 from core.avoidance import field_obstacles_to_game, DEFAULT_CLEARANCE
+from core.field_geometry import pixel_radius_to_game, pixel_to_game
 from core.pathfinding import astar_game, build_enemy_chain_astar, draw_path_on_field
 from core.polynomial_planner import (
     draw_polynomial_curve_on_field,
@@ -282,8 +283,7 @@ def vertical_eps(y_from, y_to, max_coeff=VERTICAL_MAX_COEFF):
 
 
 def field_to_game(field_x, field_y):
-    game_x = -25 + field_x * 50 / field["width"]
-    game_y = 15 - field_y * 50 / field["width"]
+    game_x, game_y = pixel_to_game(field_x, field_y, field["width"], field["height"])
     return fmt_game(game_x), fmt_game(game_y)
 
 
@@ -292,7 +292,7 @@ def to_game_cords(cord_list):
 
 
 def field_radius_to_game(radius_px):
-    return fmt_game(radius_px * 50 / field["width"])
+    return fmt_game(pixel_radius_to_game(radius_px, field["width"], field["height"]))
 
 
 def field_circle_to_game(circle):
@@ -375,7 +375,7 @@ def collect_symbolic_scene(screenshot_bgr, players_params, active_params, obstac
 
     enemy_circles_game = [field_circle_to_game(circle) for circle in enemies_field]
     allies_game = [field_circle_to_game(circle) for circle in allies_field]
-    obstacles_game = field_obstacles_to_game(obstacles_field, field["width"])
+    obstacles_game = field_obstacles_to_game(obstacles_field, field["width"], field["height"])
 
     return {
         "players_result": players_result,
@@ -648,6 +648,7 @@ def main():
                 screenshot_vis,
                 sym_result["best_points"],
                 field["width"],
+                field["height"],
                 color=(0, 255, 0),
                 thickness=2,
             )
@@ -704,7 +705,7 @@ def main():
 
                 obstacle_result = find_all_obstacles(screenshot_bgr, obstacles_params)
                 obstacles_field = obstacle_result["obstacles"]
-                obstacles_game = field_obstacles_to_game(obstacles_field, field["width"])
+                obstacles_game = field_obstacles_to_game(obstacles_field, field["width"], field["height"])
 
                 allies_field, enemies_field, active_circle = split_players_for_auto(players_cords)
 
@@ -774,6 +775,7 @@ def main():
                     screenshot_vis,
                     poly_result["current_points"],
                     field["width"],
+                    field["height"],
                     color=(0, 220, 255),
                     thickness=1,
                 )
@@ -781,6 +783,7 @@ def main():
                 screenshot_vis,
                 poly_result["best_points"],
                 field["width"],
+                field["height"],
                 color=(0, 255, 0),
                 thickness=2,
             )
@@ -841,7 +844,7 @@ def main():
 
             obstacle_result = find_all_obstacles(screenshot_bgr, obstacles_params)
             obstacles_field = obstacle_result["obstacles"]
-            obstacles_game = field_obstacles_to_game(obstacles_field, field["width"])
+            obstacles_game = field_obstacles_to_game(obstacles_field, field["width"], field["height"])
 
             allies_field, enemies_field, active_circle = split_players_for_auto(players_cords)
 
@@ -889,7 +892,9 @@ def main():
                 print("  A* failed — fallback: straight chain from 1st enemy")
                 path_waypoints = [list(point) for point in enemy_centers_norm]
 
-            screenshot_vis = draw_path_on_field(screenshot_vis, path_waypoints, field["width"])
+            screenshot_vis = draw_path_on_field(
+                screenshot_vis, path_waypoints, field["width"], field["height"]
+            )
 
             summary = (
                 f"players={len(players_cords[0])}  obstacles={len(obstacles_field)}  "

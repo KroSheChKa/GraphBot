@@ -176,23 +176,12 @@ class DotEvolution {
       }
     }
 
-    let roughness = 0;
     let pathLength = 0;
-    let previousSlope = null;
     for (let i = 0; i < agent.path.length - 1; i++) {
       const left = agent.path[i];
       const right = agent.path[i + 1];
-      const dx = Math.max(1e-9, right.x - left.x);
-      const dy = right.y - left.y;
-      const slope = dy / dx;
-      pathLength += Math.hypot(dx, dy);
-      if (previousSlope !== null) {
-        const bend = slope - previousSlope;
-        roughness += bend * bend;
-      }
-      previousSlope = slope;
+      pathLength += Math.hypot(right.x - left.x, right.y - left.y);
     }
-    roughness /= Math.max(1, agent.path.length - 2);
 
     const horizontalSpan = Math.max(
       1e-9,
@@ -206,7 +195,6 @@ class DotEvolution {
       hits,
       missDistance,
       edgePenalty,
-      roughness,
       excessLength,
       targetDistances,
       // Display/debug value only. Selection uses compareAgents() below.
@@ -215,7 +203,6 @@ class DotEvolution {
         constraintPenalty * 10_000_000 -
         missDistance * 1_000 -
         edgePenalty * 25 -
-        roughness * 2 -
         excessLength,
     };
   }
@@ -233,9 +220,7 @@ class DotEvolution {
     if (Math.abs(a.edgePenalty - b.edgePenalty) > 1e-9) {
       return a.edgePenalty - b.edgePenalty;
     }
-    const aShape = a.roughness + a.excessLength * 0.08;
-    const bShape = b.roughness + b.excessLength * 0.08;
-    return aShape - bShape;
+    return a.excessLength - b.excessLength;
   }
 
   evaluateEdgePenalty(path) {

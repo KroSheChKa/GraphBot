@@ -1,16 +1,18 @@
 {
   "active": {
-    "red_excess_thresh": 18,
+    "red_excess_thresh": 59,
     "hsv_h_low": 0,
-    "hsv_h_high": 12,
+    "hsv_h_high": 6,
     "hsv_h_low2": 168,
     "hsv_h_high2": 180,
-    "hsv_s_min": 30,
-    "hsv_v_min": 40,
-    "glow_blur": 5,
-    "glow_dilate": 2,
-    "glow_min_area": 80,
-    "match_max_dist": 40,
-    "left_side_only": 1
+    "hsv_s_min": 167,
+    "hsv_v_min": 32,
+    "glow_blur": 3,
+    "glow_dilate": 1,
+    "glow_min_area": 45,
+    "match_max_dist": 17,
+    "left_side_only": 1,
+    "refine_scale": 10,
+    "review_uncertainty_game": 0.05
   }
 }

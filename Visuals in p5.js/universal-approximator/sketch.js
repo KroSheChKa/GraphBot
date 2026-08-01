@@ -95,6 +95,105 @@ let dotGenerationStartedAt = 0;
 let forbiddenGrid = null;
 let forbiddenStats = null;
 let forbiddenError = null;
+let activeAnchor = null;
+let draggingAnchor = false;
+
+function clonePoint(point) {
+  return { x: Number(point.x), y: Number(point.y) };
+}
+
+function anchorPoint() {
+  return activeAnchor ? clonePoint(activeAnchor.point) : null;
+}
+
+function seedAnchorPoints() {
+  const point = anchorPoint();
+  if (!point) return;
+  clickPoints = [clonePoint(point)];
+  drawnPoints = [clonePoint(point)];
+  dotPoints = [clonePoint(point)];
+}
+
+function setActiveAnchor(payload) {
+  if (!payload || !payload.game) {
+    activeAnchor = null;
+    return;
+  }
+  activeAnchor = {
+    point: {
+      x: constrain(Number(payload.game.x), X_MIN, X_MAX),
+      y: constrain(Number(payload.game.y), Y_MIN, Y_MAX),
+    },
+    pixel: payload.pixel || null,
+    confidence: Number(payload.confidence ?? 0),
+    uncertaintyGame: payload.uncertainty_game || { x: 0, y: 0 },
+    method: payload.method || "unknown",
+    needsReview: Boolean(payload.needs_review),
+    source: "auto",
+  };
+  seedAnchorPoints();
+}
+
+function anchorStatusText() {
+  if (!activeAnchor) return "A: not detected";
+  const uncertainty = Math.max(
+    Number(activeAnchor.uncertaintyGame?.x || 0),
+    Number(activeAnchor.uncertaintyGame?.y || 0)
+  );
+  const source = activeAnchor.source === "manual" ? "manual" : "auto";
+  const review = activeAnchor.needsReview ? " — check/drag A" : "";
+  const confidence = roundCoord(Number(activeAnchor.confidence || 0));
+  const point = activeAnchor.point;
+  return `A ${source} (${roundCoord(point.x)},${roundCoord(point.y)}) conf=${confidence} ±${roundCoord(uncertainty)}${review}`;
+}
+
+function updatePointAnchor(point) {
+  if (!activeAnchor) return;
+  activeAnchor.point = {
+    x: constrain(Number(point.x), X_MIN, X_MAX),
+    y: constrain(Number(point.y), Y_MIN, Y_MAX),
+  };
+  activeAnchor.pixel = null;
+  activeAnchor.method = "manual override";
+  activeAnchor.source = "manual";
+  activeAnchor.needsReview = false;
+  activeAnchor.confidence = 1;
+  activeAnchor.uncertaintyGame = { x: 0, y: 0 };
+  if (clickPoints.length > 0) clickPoints[0] = anchorPoint();
+  if (drawnPoints.length > 0) drawnPoints[0] = anchorPoint();
+  if (dotPoints.length > 0) dotPoints[0] = anchorPoint();
+  syncClickWaypoints();
+  resetDotEvolutionEngine();
+  if (params.inputMode === "draw" && drawnPoints.length > 0) processPipeline();
+  updateStatusPanel();
+  updateCopyButton();
+}
+
+function anchorScreenPosition() {
+  if (!activeAnchor) return null;
+  return worldToScreen(activeAnchor.point.x, activeAnchor.point.y);
+}
+
+function isOverAnchor(sx, sy) {
+  const screen = anchorScreenPosition();
+  if (!screen) return false;
+  return dist(sx, sy, screen.x, screen.y) <= 18;
+}
+
+function drawActiveAnchor() {
+  if (!activeAnchor || params.inputMode !== "draw") return;
+  const screen = anchorScreenPosition();
+  const color = activeAnchor.needsReview ? COLORS.dotEnemy : COLORS.anchor;
+  noStroke();
+  fill(color[0], color[1], color[2], 55);
+  circle(screen.x, screen.y, 28);
+  fill(...color);
+  circle(screen.x, screen.y, 13);
+  fill(20, 20, 24);
+  textAlign(CENTER, CENTER);
+  textSize(11);
+  text("A", screen.x, screen.y);
+}
 
 function setup() {
   const cnv = createCanvas(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -123,6 +222,7 @@ function draw() {
     drawApproximation();
     drawNetworkOverlay();
   }
+  drawActiveAnchor();
 }
 
 const MLP_ACTIVATION_OPTIONS = [
@@ -790,7 +890,7 @@ function updateDotButtons() {
     startBtn.textContent = dotEvolution ? "Restart evolution" : "Start evolution";
   }
   if (stopBtn) stopBtn.disabled = !dotRunning;
-  if (undoBtn) undoBtn.disabled = dotPoints.length === 0;
+  if (undoBtn) undoBtn.disabled = dotPoints.length <= (activeAnchor ? 1 : 0);
   if (clearBtn) clearBtn.disabled = dotPoints.length === 0;
 }
 
@@ -806,13 +906,13 @@ function addDotPointAtMouse() {
 }
 
 function undoLastDotPoint() {
-  if (dotPoints.length === 0) return;
+  if (dotPoints.length <= (activeAnchor ? 1 : 0)) return;
   dotPoints.pop();
   resetDotEvolutionEngine();
 }
 
 function clearDotPoints() {
-  dotPoints = [];
+  dotPoints = activeAnchor ? [anchorPoint()] : [];
   resetDotEvolutionEngine();
 }
 
@@ -1066,7 +1166,8 @@ function updateStatusPanel() {
   if (params.inputMode === "click") {
     const segments = Math.max(0, clickWaypoints.length - 1);
     const targets = Math.max(0, clickPoints.length - 1);
-    statusMseEl.textContent = `active (A): ${clickPoints.length > 0 ? "yes" : "no"}  |  targets: ${targets}  |  segments: ${segments}`;
+    statusMseEl.textContent =
+      `${anchorStatusText()}  |  targets: ${targets}  |  segments: ${segments}`;
     return;
   }
 
@@ -1083,7 +1184,7 @@ function updateStatusPanel() {
           ? `mask cells: ${forbiddenStats.grid_forbidden_cells}`
           : "mask: capture field first";
       statusMseEl.textContent =
-        `active (A): ${start ? "yes" : "no"}  |  targets: ${targets}` +
+        `${anchorStatusText()}  |  targets: ${targets}` +
         `  |  ${maskState}` +
         (unreachable > 0 ? `  |  unreachable: ${unreachable}` : "");
       return;
@@ -1098,7 +1199,7 @@ function updateStatusPanel() {
       `  |  obstacles: ${collisionState}` +
       `  |  miss: ${roundCoord(best.missDistance)}` +
       `  |  edge: ${roundCoord(best.edgePenalty)}` +
-      `  |  smoothness: ${roundCoord(best.roughness)}` +
+      `  |  ${anchorStatusText()}` +
       (unreachable > 0 ? `  |  unreachable: ${unreachable}` : "");
     return;
   }
@@ -1109,7 +1210,7 @@ function updateStatusPanel() {
 function updateStatusMse() {
   if (!statusMseEl) return;
   if (trainingData.length === 0) {
-    statusMseEl.textContent = "MSE: —";
+    statusMseEl.textContent = `${anchorStatusText()}  |  MSE: —`;
     return;
   }
 
@@ -1119,7 +1220,7 @@ function updateStatusMse() {
       ? `active: ${activeMethodLabel} ${formatMse(linearMse)}`
       : `active: ${activeMethodLabel} ${formatMse(network?.mse)}`;
   const compare = `compare — linear: ${formatMse(linearMse)}  |  sigmoid: ${formatMse(sigmoidMse)}  |  Taylor: ${formatMse(taylorMse)}  |  Fourier: ${formatMse(fourierMse)}`;
-  const meta = `training points: ${trainingData.length}  |  segments: ${Math.max(0, linearWaypoints.length - 1)}`;
+  const meta = `training points: ${trainingData.length}  |  segments: ${Math.max(0, linearWaypoints.length - 1)}  |  ${anchorStatusText()}`;
   statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
 }
 
@@ -1176,7 +1277,7 @@ function addClickPointAtMouse() {
 }
 
 function undoLastClick() {
-  if (clickPoints.length === 0) return;
+  if (clickPoints.length <= (activeAnchor ? 1 : 0)) return;
   clickPoints.pop();
   syncClickWaypoints();
   updateStatusPanel();
@@ -1184,7 +1285,7 @@ function undoLastClick() {
   logActiveFormula();
 }
 
-function clearWorkspaceState() {
+function clearWorkspaceState({ keepAnchor = true } = {}) {
   clickPoints = [];
   clickWaypoints = [];
   drawnPoints = [];
@@ -1203,6 +1304,7 @@ function clearWorkspaceState() {
   dotRunning = false;
   dotEvolution = null;
   dotGenerationStartedAt = 0;
+  if (keepAnchor) seedAnchorPoints();
   updateStatusPanel();
   updateCopyButton();
   updateDotButtons();
@@ -1242,7 +1344,7 @@ function interpolateY(merged, x) {
   return merged[merged.length - 1].y;
 }
 
-function resampleUniform(merged, step) {
+function resampleUniform(merged, step, requiredPoints = []) {
   if (merged.length === 0) return [];
   if (merged.length === 1) {
     return [{ x: merged[0].x, y: merged[0].y }];
@@ -1260,7 +1362,14 @@ function resampleUniform(merged, step) {
     samples.push({ x: xEnd, y: interpolateY(merged, xEnd) });
   }
 
-  return samples;
+  for (const point of requiredPoints) {
+    if (point.x < xStart - 1e-9 || point.x > xEnd + 1e-9) continue;
+    samples.push({ x: point.x, y: point.y });
+  }
+  samples.sort((a, b) => a.x - b.x);
+  return samples.filter(
+    (point, index) => index === 0 || Math.abs(point.x - samples[index - 1].x) > 1e-9
+  );
 }
 
 function evalDirectLineSegment(p1, p2, x) {
@@ -1286,7 +1395,23 @@ function evalLinearWaypoints(waypoints, x) {
 
 function buildTrainingData(points) {
   mergedWaypoints = mergeByX(points);
-  return resampleUniform(mergedWaypoints, params.sampleStep);
+  const samples = resampleUniform(
+    mergedWaypoints,
+    params.sampleStep,
+    activeAnchor ? [activeAnchor.point] : []
+  );
+  if (!activeAnchor) return samples;
+
+  const anchor = activeAnchor.point;
+  const existing = samples.find((point) => Math.abs(point.x - anchor.x) <= 1e-9);
+  if (existing) {
+    existing.x = anchor.x;
+    existing.y = anchor.y;
+  } else {
+    samples.push(clonePoint(anchor));
+    samples.sort((a, b) => a.x - b.x);
+  }
+  return samples;
 }
 
 function syncLinearWaypointsFromDataset() {
@@ -1454,7 +1579,16 @@ async function captureGameField() {
       );
     });
 
-    clearWorkspaceState();
+    clearWorkspaceState({ keepAnchor: false });
+    setActiveAnchor(data.active_anchor);
+    if (data.field_archive) {
+      console.info(`[field archive] saved ${data.field_archive.relative_path}`);
+    } else if (data.field_archive_error) {
+      console.warn(`[field archive] ${data.field_archive_error}`);
+    }
+    if (!data.active_anchor) {
+      console.warn("Active player was not detected; click A manually or recapture the field.");
+    }
     forbiddenGrid = data.forbidden_grid ? new ForbiddenGrid(data.forbidden_grid) : null;
     forbiddenStats = data.forbidden_stats ?? null;
     forbiddenError =
@@ -1497,7 +1631,26 @@ function trainSigmoidNetwork() {
     params.trainLr,
     params.freezeX0
   );
+  enforceNetworkAnchor(network);
   sigmoidMse = network.mse;
+}
+
+function enforceNetworkAnchor(model) {
+  if (!activeAnchor || !model || typeof model.predict !== "function") return;
+  const x = activeAnchor.point.x;
+  const y = activeAnchor.point.y;
+  const correction = y - model.predict(x);
+  if (!Number.isFinite(correction)) return;
+
+  if (Object.prototype.hasOwnProperty.call(model, "bias")) {
+    model.bias += correction;
+  } else if (Array.isArray(model.layers) && model.layers.length > 0) {
+    const output = model.layers[model.layers.length - 1];
+    if (output?.b?.length) output.b[0] += correction;
+  }
+
+  if (typeof model.sanitizeParams === "function") model.sanitizeParams();
+  if (typeof model.computeMse === "function") model.mse = model.computeMse(trainingData);
 }
 
 function trainTaylorNetwork() {
@@ -1510,6 +1663,7 @@ function trainTaylorNetwork() {
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
   network.train(trainingData, params.trainEpochs, params.trainLr);
+  enforceNetworkAnchor(network);
   taylorMse = network.mse;
 }
 
@@ -1523,6 +1677,7 @@ function trainFourierNetwork() {
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
   network.train(trainingData, params.trainEpochs, params.trainLr);
+  enforceNetworkAnchor(network);
   fourierMse = network.mse;
 }
 
@@ -1606,6 +1761,11 @@ function lineWorld(x1, y1, x2, y2) {
 function mousePressed() {
   if (!mouseInsideCanvas()) return;
 
+  if (activeAnchor && isOverAnchor(mouseX, mouseY)) {
+    draggingAnchor = true;
+    return false;
+  }
+
   if (params.inputMode === "click") {
     if (mouseButton === RIGHT) {
       undoLastClick();
@@ -1627,7 +1787,7 @@ function mousePressed() {
   }
 
   isDrawing = true;
-  drawnPoints = [];
+  drawnPoints = activeAnchor ? [anchorPoint()] : [];
   mergedWaypoints = [];
   linearWaypoints = [];
   trainingData = [];
@@ -1644,11 +1804,19 @@ function mousePressed() {
 }
 
 function mouseDragged() {
+  if (draggingAnchor) {
+    updatePointAnchor(screenToWorld(mouseX, mouseY));
+    return;
+  }
   if (params.inputMode !== "draw" || !isDrawing || !mouseInsideCanvas()) return;
   addPointAtMouse();
 }
 
 function mouseReleased() {
+  if (draggingAnchor) {
+    draggingAnchor = false;
+    return;
+  }
   if (params.inputMode !== "draw" || !isDrawing) return;
   isDrawing = false;
   finishDrawing();
@@ -1707,7 +1875,7 @@ function keyPressed() {
       clearDotPoints();
       return false;
     }
-    drawnPoints = [];
+    drawnPoints = activeAnchor ? [anchorPoint()] : [];
     mergedWaypoints = [];
     linearWaypoints = [];
     trainingData = [];
@@ -1719,6 +1887,7 @@ function keyPressed() {
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";
+    updateStatusPanel();
     updateCopyButton();
   }
 }

@@ -97,7 +97,7 @@ The main tool is a local p5.js app served by Python:
 python tools/approximator_server.py
 ```
 
-Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
+The server automatically opens **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your default browser.
 
 | Mode | What it does |
 |------|----------------|
@@ -114,7 +114,15 @@ Open **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your browser.
 | Copy formula | **Copy y** |
 | Reset sliders & canvas state | **Reset** |
 
-**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot.
+**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot. The active soldier is detected from the red outline and inserted as a persistent first point **A** in Click, Draw, and Dot modes. If the confidence is low, drag **A** to correct it; `C` and Undo never remove this anchor.
+
+Every successful **Capture field** also stores the clean raw field crop as a lossless PNG in the local, Git-ignored folder `data/field_captures/`. The archive is written before detection and contains no points, formulas, trajectories, masks, or UI overlays. These files are reserved for later regression tests and detector tuning.
+
+### Field and active-player calibration
+
+Run `python tools/preview_capture.py`, adjust `left`, `top`, `right`, and `bottom` until the grid follows the playable area, then press **s** to save `config/capture_config.json`. The preview shows `x=-25,0,25`, `y=15,0,-15`, field size, and game-units-per-pixel.
+
+For the active player, run `python tools/calibrate_active.py`. Its separate ×10 ROI window shows the refined center (green), Hough source center (yellow), and red-ring estimate (magenta). Press **d** to save `outputs/active_debug.png`. The ±0.05 game-unit value is a review threshold, not extra information created by enlargement; uncertainty remains limited by the original screenshot.
 
 ### Click mode (web UI)
 
@@ -162,7 +170,7 @@ flowchart LR
 ```
 
 1. **Capture** — crop the game field via Win32 window rect + margins from `config/capture_config.json`.
-2. **Detect** — find allies, enemies, active player (red glow), and black obstacles (OpenCV + Hough) *on the screenshot only*.
+2. **Detect** — find allies, enemies, the active-player center (red glow + refined player circle), and black obstacles (OpenCV + Hough) *on the screenshot only*.
 3. **Plan** — build waypoints (click), freehand draw + resample (draw), or evolve left-to-right control-point paths (dot). *(Auto planners in `GraphBot.py` — A*, polynomial search, symbolic GA — are experimental.)*
 4. **Encode** — convert segments or approximations into Graphwar syntax and copy to clipboard.
 
@@ -446,7 +454,7 @@ Dot mode is the animated genetic-search workflow in the web UI:
 3. Press **Start evolution** and watch each population grow from A across the field.
 4. Stop when satisfied and use **Copy y** to copy the best agent as a Graphwar piecewise-line expression.
 
-Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`, so agents remain left-to-right mathematical functions. Selection is lexicographic: maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer smoother and shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
+Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`, so agents remain left-to-right mathematical functions. Selection is lexicographic: maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
 
 | Control | Effect |
 |---------|--------|
