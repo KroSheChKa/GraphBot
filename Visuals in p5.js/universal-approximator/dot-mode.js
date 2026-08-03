@@ -17,7 +17,9 @@ class DotEvolution {
     this.config = {
       populationSize: Math.max(8, Math.round(config.populationSize ?? 48)),
       controlPoints: Math.max(4, Math.round(config.controlPoints ?? 12)),
-      targetRadius: Math.max(0.05, Number(config.targetRadius ?? 0.65)),
+      trajectoryType: config.trajectoryType === "spline" ? "spline" : "linear",
+      splineSamplesPerSegment: Math.max(4, Math.round(config.splineSamplesPerSegment ?? 16)),
+      targetRadius: Math.min(0.25, Math.max(0.05, Number(config.targetRadius ?? 0.15))),
       mutationScale: Math.max(0.02, Number(config.mutationScale ?? 0.9)),
       edgeOffset: Math.max(0, Number(config.edgeOffset ?? 1.0)),
       eliteFraction: Math.min(0.35, Math.max(0.04, Number(config.eliteFraction ?? 0.12))),
@@ -69,11 +71,11 @@ class DotEvolution {
           genes[gene] + this.gaussian() * this.config.mutationScale * 2.2
         );
       }
-      population.push(this.makeAgent(genes));
+      population.push(this.makeAliveAgent(genes));
     }
 
     while (population.length < this.config.populationSize) {
-      population.push(this.makeAgent(this.randomWalkGenes()));
+      population.push(this.makeAliveAgent(this.randomWalkGenes()));
     }
     return population;
   }
@@ -138,7 +140,59 @@ class DotEvolution {
     locked[0] = this.start.y;
     for (let i = 1; i < locked.length; i++) locked[i] = this.clampY(locked[i]);
     const path = this.knotXs.map((x, index) => ({ x, y: locked[index] }));
-    return { genes: locked, path, fitness: null };
+    return {
+      genes: locked,
+      path,
+      trajectory: this.buildTrajectory(path),
+      fitness: null,
+    };
+  }
+
+  makeAliveAgent(seedGenes) {
+    const baseGenes = seedGenes.slice();
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const genes = baseGenes.slice();
+      if (attempt > 0 && attempt < 16) this.mutate(genes);
+      if (attempt >= 16) {
+        const randomGenes = this.randomWalkGenes();
+        for (let index = 0; index < genes.length; index++) genes[index] = randomGenes[index];
+      }
+      const agent = this.makeAgent(genes);
+      agent.fitness = this.evaluateAgent(agent);
+      if (agent.fitness.alive) return agent;
+    }
+
+    // A constant path at the active player's height is always inside the field
+    // and keeps the population alive even when a spline overshoots repeatedly.
+    const safeGenes = this.knotXs.map(() => this.start.y);
+    const safeAgent = this.makeAgent(safeGenes);
+    safeAgent.fitness = this.evaluateAgent(safeAgent);
+    return safeAgent;
+  }
+
+  buildTrajectory(path) {
+    if (this.config.trajectoryType !== "spline" || typeof CubicSplineModel !== "function") {
+      return path.map((point) => ({ ...point }));
+    }
+
+    const spline = new CubicSplineModel(path, "natural");
+    const sampled = [];
+    const samplesPerSegment = this.config.splineSamplesPerSegment;
+    for (let index = 0; index < path.length - 1; index++) {
+      const left = path[index];
+      const right = path[index + 1];
+      for (let sample = 0; sample < samplesPerSegment; sample++) {
+        const t = sample / samplesPerSegment;
+        const x = left.x + (right.x - left.x) * t;
+        const predictedY = spline.predict(x);
+        sampled.push({
+          x,
+          y: Number.isFinite(predictedY) ? predictedY : left.y + (right.y - left.y) * t,
+        });
+      }
+    }
+    sampled.push({ ...path[path.length - 1] });
+    return sampled;
   }
 
   evaluatePopulation() {
@@ -159,12 +213,14 @@ class DotEvolution {
   evaluateAgent(agent) {
     // Empty in v1. A future lethal-zone evaluator can return a positive
     // violation count/penalty here and automatically outrank unsafe paths.
+    const trajectory = agent.trajectory ?? agent.path;
+    const boundaryViolation = this.evaluateBoundaryViolation(trajectory);
     const constraintPenalty = this.config.constraintEvaluators.reduce(
-      (sum, evaluator) => sum + Math.max(0, Number(evaluator(agent.path)) || 0),
+      (sum, evaluator) => sum + Math.max(0, Number(evaluator(trajectory)) || 0),
       0
     );
     const targetDistances = this.targets.map((target) =>
-      DotEvolution.pointPolylineDistance(target, agent.path)
+      DotEvolution.pointPolylineDistance(target, trajectory)
     );
     let hits = 0;
     let missDistance = 0;
@@ -177,29 +233,32 @@ class DotEvolution {
     }
 
     let pathLength = 0;
-    for (let i = 0; i < agent.path.length - 1; i++) {
-      const left = agent.path[i];
-      const right = agent.path[i + 1];
+    for (let i = 0; i < trajectory.length - 1; i++) {
+      const left = trajectory[i];
+      const right = trajectory[i + 1];
       pathLength += Math.hypot(right.x - left.x, right.y - left.y);
     }
 
     const horizontalSpan = Math.max(
       1e-9,
-      agent.path[agent.path.length - 1].x - agent.path[0].x
+      trajectory[trajectory.length - 1].x - trajectory[0].x
     );
     const excessLength = Math.max(0, pathLength / horizontalSpan - 1);
-    const edgePenalty = this.evaluateEdgePenalty(agent.path);
+    const edgePenalty = this.evaluateEdgePenalty(trajectory);
 
     return {
       constraintPenalty,
       hits,
       missDistance,
       edgePenalty,
+      boundaryViolation,
+      alive: boundaryViolation <= 1e-9,
       excessLength,
       targetDistances,
       // Display/debug value only. Selection uses compareAgents() below.
       score:
         hits * 1_000_000 -
+        boundaryViolation * 10_000_000 -
         constraintPenalty * 10_000_000 -
         missDistance * 1_000 -
         edgePenalty * 25 -
@@ -210,6 +269,7 @@ class DotEvolution {
   compareAgents(left, right) {
     const a = left.fitness;
     const b = right.fitness;
+    if (a.alive !== b.alive) return a.alive ? -1 : 1;
     if (Math.abs(a.constraintPenalty - b.constraintPenalty) > 1e-9) {
       return a.constraintPenalty - b.constraintPenalty;
     }
@@ -221,6 +281,15 @@ class DotEvolution {
       return a.edgePenalty - b.edgePenalty;
     }
     return a.excessLength - b.excessLength;
+  }
+
+  evaluateBoundaryViolation(path) {
+    let violation = 0;
+    for (const point of path) {
+      if (point.y < this.config.yMin) violation += this.config.yMin - point.y;
+      if (point.y > this.config.yMax) violation += point.y - this.config.yMax;
+    }
+    return violation;
   }
 
   evaluateEdgePenalty(path) {
@@ -257,19 +326,19 @@ class DotEvolution {
       Math.floor(this.config.populationSize * this.config.eliteFraction)
     );
     for (let i = 0; i < eliteCount; i++) {
-      next.push(this.makeAgent(this.population[i].genes));
+      next.push(this.makeAliveAgent(this.population[i].genes));
     }
 
     while (next.length < this.config.populationSize) {
       if (this.stagnantGenerations >= 18 && Math.random() < 0.28) {
-        next.push(this.makeAgent(this.randomWalkGenes()));
+        next.push(this.makeAliveAgent(this.randomWalkGenes()));
         continue;
       }
       const parentA = this.selectParent();
       const parentB = this.selectParent();
       const childGenes = this.crossover(parentA.genes, parentB.genes);
       this.mutate(childGenes);
-      next.push(this.makeAgent(childGenes));
+      next.push(this.makeAliveAgent(childGenes));
     }
 
     this.population = next;
@@ -314,6 +383,7 @@ class DotEvolution {
     return {
       genes: agent.genes.slice(),
       path: agent.path.map((point) => ({ ...point })),
+      trajectory: (agent.trajectory ?? agent.path).map((point) => ({ ...point })),
       fitness: {
         ...agent.fitness,
         targetDistances: agent.fitness.targetDistances.slice(),

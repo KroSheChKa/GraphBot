@@ -2,7 +2,7 @@
 
 > A passion project for [Graphwar](https://github.com/catabriga/graphwar) — turn what you see on the battlefield into a paste-ready mathematical function.
 
-GraphBot watches the game field and builds Graphwar-compatible formulas. The **recommended workflow** is the local **web UI** (`approximator_server.py`) — **Click mode** (default), **Draw mode** with four approximation methods, and an animated genetic **Dot mode**. **`GraphBot.py`** still offers click mode (OpenCV overlay) and an **automatic mode** prototype that is **not production-ready yet**.
+GraphBot watches the game field and builds Graphwar-compatible formulas. The **recommended workflow** is the local **web UI** (`approximator_server.py`) — **Click mode** (default), **Draw mode** with five approximation methods, and an animated genetic **Dot mode**. **`GraphBot.py`** still offers click mode (OpenCV overlay) and an **automatic mode** prototype that is **not production-ready yet**.
 
 > **Project status:** web UI click + draw = ready to use · Dot mode = first playable GA version · `GraphBot.py` auto mode = work in progress (see [Auto mode](#auto-mode-work-in-progress))
 
@@ -30,6 +30,7 @@ https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
   - [Sigmoid network (universal approximation)](#2-sigmoid-network-universal-approximation)
   - [Taylor features (polynomial / beta)](#3-taylor-features-polynomial--beta)
   - [Fourier features (harmonics)](#4-fourier-features-harmonics)
+  - [Cubic spline and B-spline](#5-cubic-spline-and-b-spline)
   - [Activation functions (Taylor / Fourier MLP)](#activation-functions-taylor--fourier-mlp)
 - [Dot mode](#dot-mode)
 - [Auto mode (work in progress)](#auto-mode-work-in-progress)
@@ -102,7 +103,7 @@ The server automatically opens **[http://127.0.0.1:8765/](http://127.0.0.1:8765/
 | Mode | What it does |
 |------|----------------|
 | **1. Click mode** *(default)* | Place waypoints on the canvas; get a piecewise `direct_line` formula |
-| **2. Draw mode** | Sketch a curve, resample to a dataset, approximate with 4 methods |
+| **2. Draw mode** | Sketch a curve, resample to a dataset, approximate with 5 methods |
 | **3. Dot mode** | Place the active soldier and unordered enemies; evolve a population of left-to-right trajectories |
 
 ### Shared controls
@@ -110,11 +111,12 @@ The server automatically opens **[http://127.0.0.1:8765/](http://127.0.0.1:8765/
 | Action | Control |
 |--------|---------|
 | Capture Graphwar field as background | **Capture field** (Graphwar must be running; window moved to corner for alignment) |
+| Active player source | **Auto-detect active player** toggle; disable it to place A manually |
 | Clear current path / stroke | **C** *(background screenshot stays)* |
 | Copy formula | **Copy y** |
 | Reset sliders & canvas state | **Reset** |
 
-**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot. The active soldier is detected from the red outline and inserted as a persistent first point **A** in Click, Draw, and Dot modes. If the confidence is low, drag **A** to correct it; `C` and Undo never remove this anchor.
+**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot. With **Auto-detect active player** enabled, GraphBot finds the stable yellow body of each sprite and then matches the circular red active marker around it; red name outlines are not used as the anchor. The result is shown as **A** and seeds Click/Dot mode. In Draw mode the stroke starts only where you first touch the canvas; **A** never creates a line to that first touch. If A falls inside the drawn x-range, it receives a soft training weight; otherwise it is ignored for that stroke. Disable the toggle to hide the automatic marker and place **A** manually. The marker is not draggable, so drawing over it remains an ordinary canvas action.
 
 Every successful **Capture field** also stores the clean raw field crop as a lossless PNG in the local, Git-ignored folder `data/field_captures/`. The archive is written before detection and contains no points, formulas, trajectories, masks, or UI overlays. These files are reserved for later regression tests and detector tuning.
 
@@ -122,7 +124,7 @@ Every successful **Capture field** also stores the clean raw field crop as a los
 
 Run `python tools/preview_capture.py`, adjust `left`, `top`, `right`, and `bottom` until the grid follows the playable area, then press **s** to save `config/capture_config.json`. The preview shows `x=-25,0,25`, `y=15,0,-15`, field size, and game-units-per-pixel.
 
-For the active player, run `python tools/calibrate_active.py`. Its separate ×10 ROI window shows the refined center (green), Hough source center (yellow), and red-ring estimate (magenta). Press **d** to save `outputs/active_debug.png`. The ±0.05 game-unit value is a review threshold, not extra information created by enlargement; uncertainty remains limited by the original screenshot.
+For the active player, run `python tools/calibrate_active.py`. Its separate ×10 ROI window shows the refined center (green), Hough source center (yellow), and red-ring estimate (magenta). The web capture now primarily uses a yellow-body candidate plus a circular red-ring match; the old red-glow path remains a fallback for unusual frames. Press **d** to save `outputs/active_debug.png`. The ±0.05 game-unit value is a review threshold, not extra information created by enlargement; uncertainty remains limited by the original screenshot.
 
 ### Click mode (web UI)
 
@@ -144,6 +146,7 @@ Switch to **2. Draw mode** in the side panel, then pick an approximation method:
 | **2.2 Sigmoid network** | Sum of shifted sigmoids (universal approximation) |
 | **2.3 Taylor (polynomial)** | Polynomial features ± MLP *(beta)* |
 | **2.4 Fourier (harmonics)** | Harmonic features ± MLP |
+| **2.5 Cubic spline** | C²-smooth cubic interpolation or B-spline fit |
 
 | Action | Control |
 |--------|---------|
@@ -267,7 +270,7 @@ If active-player detection fails, tune `tools/calibrate_active.py`.
 
 ## Draw mode
 
-Draw mode lives in the [web UI](#web-ui-recommended) only. Sketch a curve, sample it into a dataset, and approximate with one of four methods.
+Draw mode lives in the [web UI](#web-ui-recommended) only. Sketch a curve, sample it into a dataset, and approximate with one of five methods.
 
 <p align="center">
   <img src="docs/images/draw-mode-example.png" alt="Draw mode building a Fourier approximation from sampled curve points" width="900" />
@@ -287,12 +290,15 @@ flowchart TD
   E --> S[Sigmoid network]
   E --> T[Taylor MLP]
   E --> F[Fourier MLP]
+  E --> C[Cubic spline / B-spline]
 ```
 
 1. **Draw** — freehand stroke in game coordinates (`x: -25…25`, `y: -15…15`).
 2. **Merge** — points with nearly equal `x` are averaged (stable vertical strokes).
 3. **Resample** — uniform steps along `x` controlled by **dataset step** (`sampleStep`). More points → more linear segments; smoother target for neural approximators.
 4. **Approximate** — pick a method; compare MSE in the panel; copy the winning formula.
+
+Enable **Prevent backward drawing (x only increases)** when the stroke must behave like a function moving from left to right. If the cursor goes left, its `x` position is locked to the furthest point already reached while `y` can still move vertically; the stroke never creates a backward segment.
 
 The red curve is your intent; blue dots are the dataset; green is the approximation.
 
@@ -402,6 +408,23 @@ $$
 
 ---
 
+### 5. Cubic spline and B-spline
+
+The default cubic spline is an interpolating, piecewise-cubic curve with continuous first and second derivatives (`C²`). The **Natural** boundary condition sets the second derivative to zero at both ends; **Clamped** uses zero first derivatives at the ends. This follows the standard cubic-spline boundary-condition formulation. [SciPy CubicSpline reference](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html)
+
+Enable **Use B-spline basis** for a compact least-squares spline with a uniform clamped knot vector. Its controls are:
+
+| Parameter | Role |
+|-----------|------|
+| **B-spline control points** | More points increase detail/fit capacity; fewer points smooth the curve |
+| **B-spline smoothing λ** | Ridge regularization; `0` follows the data most closely, larger values smooth more |
+| **Curve precision (plot step)** | Preview sampling step; smaller values make the displayed curve denser |
+| **Formula decimals** | Number of decimal places retained in the copied Graphwar formula; spline export defaults to 14 because basis terms accumulate rounding errors |
+
+The copied result is converted to Graphwar-safe arithmetic using `abs`, `+`, `-`, `*`, `/`, and `^`; it does not require a piecewise-function operator.
+
+---
+
 ### Activation functions (Taylor / Fourier MLP)
 
 When **Taylor** or **Fourier** uses **≥ 1 hidden layer**, the web UI trains a small MLP on feature vector $\varphi(t)$. Choose the nonlinearity in **Hidden-layer activation** (disabled at 0 hidden layers — then the model is purely linear on $\varphi$).
@@ -452,15 +475,17 @@ Dot mode is the animated genetic-search workflow in the web UI:
 1. Switch to **3. Dot mode**.
 2. Click the active soldier first (**A**), then click enemy targets in any order.
 3. Press **Start evolution** and watch each population grow from A across the field.
-4. Stop when satisfied and use **Copy y** to copy the best agent as a Graphwar piecewise-line expression.
+4. Choose **Straight segments** or **Cubic spline**, stop when satisfied, and use **Copy y** to copy the best agent as a Graphwar expression.
 
-Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`, so agents remain left-to-right mathematical functions. Selection is lexicographic: maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
+Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`. For cubic splines, the sampled curve is checked as well: any trajectory that leaves the field is killed and never displayed or selected. Selection is lexicographic: keep in-bounds agents alive, maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
 
 | Control | Effect |
 |---------|--------|
 | **Population** | Number of visible agents per generation |
-| **Control points** | Genome/path resolution and exported segment count |
-| **Hit radius** | Circle around each enemy that counts as a hit |
+| **Control points** | Genome/path resolution and spline control-point count |
+| **Trajectory** | Evaluate and export either straight segments or a natural cubic spline through the evolved control points |
+| **Spline samples / segment** | Collision and target-distance sampling density for cubic-spline trajectories |
+| **Hit radius** | Circle around each enemy that counts as a hit (`0.05–0.25` game units) |
 | **Mutation scale** | Size of random changes between generations |
 | **Edge penalty offset** | Places neutral-zone lines inward from `y = ±15`; only trajectory samples beyond them are penalized |
 | **Generation time** | How long one animated generation remains on screen |
@@ -535,7 +560,7 @@ Automatic mode (`0` at startup) tries to detect enemies and build formulas witho
 | Teammates | Left/right split only — may route through allies |
 | Enemies | Aims at circle **centers**, not full hit radius |
 | Black obstacles | Detection exists but auto routing is **not fully wired** |
-| Active player | Fallback heuristics; red-glow detection still being tuned |
+| Active player | Yellow-body + circular red-marker matching; red-glow path remains a fallback |
 | UX | Busy-wait on F-keys; formula loop is rough around the edges |
 
 ### Planners (experimental)
@@ -591,7 +616,7 @@ High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in
 - [ ] **Teammate avoidance (auto)** — distinguish allies from enemies beyond left/right split; never route through teammates.
 - [ ] **Enemy as a circle** — use radius from Hough, not just center; one segment may hit multiple nearby enemies.
 - [ ] **Black obstacle avoidance (auto)** — enable `detect_black_circles()` in auto mode; pathfind around lethal circles.
-- [ ] **Active player detection** — prioritize red glow outline over “largest circle” heuristic.
+- [x] **Active player detection** — match the circular active marker around color-stable player candidates; keep manual toggle/fallback.
 
 ### UX & tooling
 
@@ -604,8 +629,9 @@ High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in
 - [x] **Dot mode v1:** animated populations, lexicographic fitness, start/stop controls, and champion formula export
 - [x] **Dot obstacle avoidance:** calibrated raster mask, compact grid transfer, safety-first GA fitness
 - [x] **Draw mode:** activation picker for Taylor / Fourier MLP (`tanh`, `ReLU`, `Swish`, `GELU`, `Mish`, …)
+- [x] **Active-player detection v2:** yellow-body candidates + circular red-marker matching; manual/automatic UI toggle
 - [x] **Graphwar-safe ReLU export** — `max(0,x)` → `(x+|x|)/2` in copied formulas
-- [x] Web UI with **Click mode** (default) + **Draw mode** (4 approximation methods) + **Dot mode**
+- [x] Web UI with **Click mode** (default) + **Draw mode** (5 approximation methods) + **Dot mode**
 - [x] Click mode: manual soldier (**A**), vertical segments on left-click, formula without `y=`
 - [x] Field capture resets previous clicks / strokes in the web UI
 - [x] Graceful handling when no players are detected (`GraphBot.py`)

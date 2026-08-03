@@ -8,6 +8,7 @@ const ASPECT = 5 / 3;
 const MERGE_X_EPS = 0.05;
 const CURVE_STEP = 0.15;
 const GAME_PRECISION = 5;
+const ACTIVE_ANCHOR_WEIGHT = 10;
 const CLICK_LEFT_TOLERANCE = 0.08;
 const VERTICAL_MAX_COEFF = 999;
 const VERTICAL_MIN_EPS = 0.001;
@@ -17,6 +18,8 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 
 const DEFAULT_PARAMS = {
   inputMode: "click",
+  autoDetectActive: true,
+  drawForwardOnly: false,
   approxMethod: "sigmoid",
   sampleStep: 0.5,
   sigmoidK: 100,
@@ -27,6 +30,12 @@ const DEFAULT_PARAMS = {
   fourierHarmonics: 8,
   fourierHiddenLayers: 2,
   fourierHiddenSize: 16,
+  splineBoundary: "natural",
+  splineUseBSpline: false,
+  bsplineControlPoints: 12,
+  bsplineSmoothing: 0,
+  splinePlotStep: 0.15,
+  splineFormulaPrecision: 14,
   mlpActivation: "tanh",
   trainEpochs: 500,
   trainLr: 0.02,
@@ -35,7 +44,9 @@ const DEFAULT_PARAMS = {
   freezeX0: true,
   dotPopulation: 48,
   dotControlPoints: 12,
-  dotTargetRadius: 0.65,
+  dotTrajectory: "linear",
+  dotSplineSamples: 16,
+  dotTargetRadius: 0.15,
   dotMutationScale: 0.9,
   dotEdgeOffset: 1.0,
   dotGenerationMs: 850,
@@ -79,6 +90,8 @@ let linearMse = null;
 let sigmoidMse = null;
 let taylorMse = null;
 let fourierMse = null;
+let splineMse = null;
+let splineModel = null;
 let approxXMin = null;
 let approxXMax = null;
 let isDrawing = false;
@@ -96,7 +109,7 @@ let forbiddenGrid = null;
 let forbiddenStats = null;
 let forbiddenError = null;
 let activeAnchor = null;
-let draggingAnchor = false;
+let capturedActiveAnchor = null;
 
 function clonePoint(point) {
   return { x: Number(point.x), y: Number(point.y) };
@@ -110,7 +123,6 @@ function seedAnchorPoints() {
   const point = anchorPoint();
   if (!point) return;
   clickPoints = [clonePoint(point)];
-  drawnPoints = [clonePoint(point)];
   dotPoints = [clonePoint(point)];
 }
 
@@ -134,6 +146,15 @@ function setActiveAnchor(payload) {
   seedAnchorPoints();
 }
 
+function applyActiveDetectionPreference() {
+  clearWorkspaceState({ keepAnchor: false });
+  if (params.autoDetectActive && capturedActiveAnchor) {
+    setActiveAnchor(capturedActiveAnchor);
+  }
+  updateStatusPanel();
+  updateCopyButton();
+}
+
 function anchorStatusText() {
   if (!activeAnchor) return "A: not detected";
   const uncertainty = Math.max(
@@ -141,43 +162,15 @@ function anchorStatusText() {
     Number(activeAnchor.uncertaintyGame?.y || 0)
   );
   const source = activeAnchor.source === "manual" ? "manual" : "auto";
-  const review = activeAnchor.needsReview ? " — check/drag A" : "";
+  const review = activeAnchor.needsReview ? " — review A or disable auto-detection" : "";
   const confidence = roundCoord(Number(activeAnchor.confidence || 0));
   const point = activeAnchor.point;
   return `A ${source} (${roundCoord(point.x)},${roundCoord(point.y)}) conf=${confidence} ±${roundCoord(uncertainty)}${review}`;
 }
 
-function updatePointAnchor(point) {
-  if (!activeAnchor) return;
-  activeAnchor.point = {
-    x: constrain(Number(point.x), X_MIN, X_MAX),
-    y: constrain(Number(point.y), Y_MIN, Y_MAX),
-  };
-  activeAnchor.pixel = null;
-  activeAnchor.method = "manual override";
-  activeAnchor.source = "manual";
-  activeAnchor.needsReview = false;
-  activeAnchor.confidence = 1;
-  activeAnchor.uncertaintyGame = { x: 0, y: 0 };
-  if (clickPoints.length > 0) clickPoints[0] = anchorPoint();
-  if (drawnPoints.length > 0) drawnPoints[0] = anchorPoint();
-  if (dotPoints.length > 0) dotPoints[0] = anchorPoint();
-  syncClickWaypoints();
-  resetDotEvolutionEngine();
-  if (params.inputMode === "draw" && drawnPoints.length > 0) processPipeline();
-  updateStatusPanel();
-  updateCopyButton();
-}
-
 function anchorScreenPosition() {
   if (!activeAnchor) return null;
   return worldToScreen(activeAnchor.point.x, activeAnchor.point.y);
-}
-
-function isOverAnchor(sx, sy) {
-  const screen = anchorScreenPosition();
-  if (!screen) return false;
-  return dist(sx, sy, screen.x, screen.y) <= 18;
 }
 
 function drawActiveAnchor() {
@@ -254,6 +247,10 @@ function mlpHiddenLayerCount() {
 }
 
 function buildControlsPanel() {
+  params.splineFormulaPrecision = Math.max(
+    8,
+    Math.min(14, Math.round(Number(params.splineFormulaPrecision) || 14))
+  );
   let drawMethodControls = "";
 
   if (params.inputMode === "draw") {
@@ -295,6 +292,24 @@ function buildControlsPanel() {
       <button id="btn-retrain" type="button">Retrain</button>
       <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 layers = Fourier series.</p>
     `;
+    } else if (params.approxMethod === "spline") {
+      drawMethodControls = `
+      ${controlCheckbox("splineUseBSpline", "Use B-spline basis", params.splineUseBSpline)}
+      ${!params.splineUseBSpline ? controlSelect(
+        "splineBoundary",
+        "Boundary condition",
+        [
+          { value: "natural", label: "Natural (S''=0)" },
+          { value: "clamped", label: "Clamped (S'=0)" },
+        ],
+        params.splineBoundary
+      ) : ""}
+      ${params.splineUseBSpline ? controlSlider("bsplineControlPoints", "B-spline control points", 4, 32, 1, params.bsplineControlPoints, 0) : ""}
+      ${params.splineUseBSpline ? controlSlider("bsplineSmoothing", "B-spline smoothing λ", 0, 1, 0.01, params.bsplineSmoothing, 2) : ""}
+      ${controlSlider("splinePlotStep", "Curve precision (plot step)", 0.05, 0.5, 0.05, params.splinePlotStep, 2)}
+      ${controlSlider("splineFormulaPrecision", "Formula decimals (stable export)", 8, 14, 1, params.splineFormulaPrecision, 0)}
+      <p class="note">Cubic spline is C²-smooth. Natural mode interpolates every blue point. B-spline adds adjustable control-point density and smoothing; smaller plot step gives a more detailed preview. Export uses high precision because small coefficient errors accumulate along the spline basis.</p>
+    `;
     }
   }
 
@@ -310,7 +325,17 @@ function buildControlsPanel() {
       <p class="note">1st click — active soldier. Other clicks are unordered enemy targets. Evolution always moves right; targets left of A are marked unreachable.</p>
       ${controlSlider("dotPopulation", "Population", 12, 120, 1, params.dotPopulation, 0)}
       ${controlSlider("dotControlPoints", "Control points", 4, 24, 1, params.dotControlPoints, 0)}
-      ${controlSlider("dotTargetRadius", "Hit radius", 0.2, 1.5, 0.05, params.dotTargetRadius, 2)}
+      ${controlSelect(
+        "dotTrajectory",
+        "Trajectory",
+        [
+          { value: "linear", label: "Straight segments" },
+          { value: "spline", label: "Cubic spline" },
+        ],
+        params.dotTrajectory
+      )}
+      ${params.dotTrajectory === "spline" ? controlSlider("dotSplineSamples", "Spline samples / segment", 8, 32, 1, params.dotSplineSamples, 0) : ""}
+      ${controlSlider("dotTargetRadius", "Hit radius", 0.05, 0.25, 0.01, params.dotTargetRadius, 2)}
       ${controlSlider("dotMutationScale", "Mutation scale", 0.1, 2.5, 0.05, params.dotMutationScale, 2)}
       ${controlSlider("dotEdgeOffset", "Edge penalty offset", 0, 4, 0.1, params.dotEdgeOffset, 1)}
       ${controlSlider("dotGenerationMs", "Generation time (ms)", 250, 2000, 50, params.dotGenerationMs, 0)}
@@ -329,6 +354,8 @@ function buildControlsPanel() {
     <div class="draw-mode-section">
       ${controlDrawMethodPicker()}
       ${controlSlider("sampleStep", "Dataset step", 0.1, 2, 0.05, params.sampleStep, 2)}
+      ${controlCheckbox("drawForwardOnly", "Prevent backward drawing (x only increases)", params.drawForwardOnly)}
+      <p class="note">When enabled, dragging left locks the stroke at the furthest x already reached; vertical movement is still allowed.</p>
       ${drawMethodControls}
     </div>
   `;
@@ -366,6 +393,8 @@ function buildControlsPanel() {
   controlsEl.innerHTML = `
     <h2>Parameters</h2>
     <button id="btn-capture-field" type="button">Capture field</button>
+    ${controlCheckbox("autoDetectActive", "Auto-detect active player", params.autoDetectActive)}
+    <p class="note">If disabled, click the active player manually as point A. Auto mode uses the player's image/body plus a circular active-marker match, not the name color.</p>
     ${controlInputModePicker()}
     ${modeSpecificControls}
     <button id="btn-copy-formula" type="button" disabled>Copy y</button>
@@ -516,6 +545,10 @@ function controlDrawMethodPicker() {
           <input type="radio" name="approxMethod" data-param="approxMethod" value="fourier" ${params.approxMethod === "fourier" ? "checked" : ""} />
           <span>2.4 Fourier (harmonics)</span>
         </label>
+        <label class="method-option">
+          <input type="radio" name="approxMethod" data-param="approxMethod" value="spline" ${params.approxMethod === "spline" ? "checked" : ""} />
+          <span>2.5 Cubic spline</span>
+        </label>
       </div>
     </div>
   `;
@@ -532,6 +565,8 @@ function formatParam(key, value, decimals) {
     key === "fourierHarmonics" ||
     key === "fourierHiddenLayers" ||
     key === "fourierHiddenSize" ||
+    key === "bsplineControlPoints" ||
+    key === "splineFormulaPrecision" ||
     key === "dotPopulation" ||
     key === "dotControlPoints" ||
     key === "dotGenerationMs"
@@ -604,7 +639,17 @@ function onParamChange(event) {
     return;
   }
 
+  if (changedKey === "autoDetectActive") {
+    applyActiveDetectionPreference();
+    updateStatusPanel();
+    updateCopyButton();
+    return;
+  }
+
   if (params.inputMode === "dot") {
+    if (changedKey === "dotTrajectory") {
+      buildControlsPanel();
+    }
     if (newValue !== prevValue && changedKey !== "dotShowForbidden") {
       resetDotEvolutionEngine();
     }
@@ -616,6 +661,10 @@ function onParamChange(event) {
 
   if (params.inputMode !== "draw") return;
 
+  if (changedKey === "drawForwardOnly" && params.drawForwardOnly) {
+    clampDrawnPointsToForwardX();
+  }
+
   if (changedKey === "approxMethod" && params.approxMethod !== prevMethod) {
     buildControlsPanel();
     if (params.approxMethod === "sigmoid" && trainingData.length >= 2) {
@@ -624,9 +673,19 @@ function onParamChange(event) {
       trainTaylorNetwork();
     } else if (params.approxMethod === "fourier" && trainingData.length >= 2) {
       trainFourierNetwork();
+    } else if (params.approxMethod === "spline" && trainingData.length >= 2) {
+      trainSplineModel();
     } else if (params.approxMethod === "linear") {
       network = null;
     }
+    updateStatusPanel();
+    updateCopyButton();
+    logActiveFormula();
+    return;
+  }
+  if (changedKey === "splineUseBSpline") {
+    buildControlsPanel();
+    if (trainingData.length >= 2) trainSplineModel();
     updateStatusPanel();
     updateCopyButton();
     logActiveFormula();
@@ -647,7 +706,10 @@ function syncActivationSelectState() {
 
 function resetParams() {
   params = { ...DEFAULT_PARAMS };
-  clearWorkspaceState();
+  clearWorkspaceState({ keepAnchor: false });
+  if (params.autoDetectActive && capturedActiveAnchor) {
+    setActiveAnchor(capturedActiveAnchor);
+  }
   buildControlsPanel();
   if (params.inputMode === "draw" && drawnPoints.length > 0) rerunPipeline();
 }
@@ -745,9 +807,14 @@ function usesFeatureNetwork() {
   );
 }
 
+function usesSplineModel() {
+  return params.approxMethod === "spline";
+}
+
 function drawApproximation() {
   if (approxXMin === null || approxXMax === null) return;
   if (usesFeatureNetwork() && !network) return;
+  if (usesSplineModel() && !splineModel) return;
   if (params.approxMethod === "linear" && linearWaypoints.length < 2) return;
 
   if (params.approxMethod === "linear") {
@@ -760,20 +827,24 @@ function drawApproximation() {
   stroke(...COLORS.approxGlow);
   strokeWeight(5);
   beginShape();
-  for (let x = approxXMin; x <= approxXMax + 1e-9; x += CURVE_STEP) {
-    const y = constrain(network.predict(x), Y_MIN, Y_MAX);
+  const step = usesSplineModel() ? params.splinePlotStep : CURVE_STEP;
+  for (let x = approxXMin; x <= approxXMax + 1e-9; x += step) {
+    const y = constrain(usesSplineModel() ? splineModel.predict(x) : network.predict(x), Y_MIN, Y_MAX);
     const s = worldToScreen(x, y);
     vertex(s.x, s.y);
   }
+  const end = worldToScreen(approxXMax, constrain(usesSplineModel() ? splineModel.predict(approxXMax) : network.predict(approxXMax), Y_MIN, Y_MAX));
+  vertex(end.x, end.y);
   endShape();
   stroke(...COLORS.approx);
   strokeWeight(2.5);
   beginShape();
-  for (let x = approxXMin; x <= approxXMax + 1e-9; x += CURVE_STEP) {
-    const y = constrain(network.predict(x), Y_MIN, Y_MAX);
+  for (let x = approxXMin; x <= approxXMax + 1e-9; x += step) {
+    const y = constrain(usesSplineModel() ? splineModel.predict(x) : network.predict(x), Y_MIN, Y_MAX);
     const s = worldToScreen(x, y);
     vertex(s.x, s.y);
   }
+  vertex(end.x, end.y);
   endShape();
 }
 
@@ -828,6 +899,8 @@ function dotConfigFromParams() {
   return {
     populationSize: params.dotPopulation,
     controlPoints: params.dotControlPoints,
+    trajectoryType: params.dotTrajectory,
+    splineSamplesPerSegment: params.dotSplineSamples,
     targetRadius: params.dotTargetRadius,
     mutationScale: params.dotMutationScale,
     edgeOffset: params.dotEdgeOffset,
@@ -963,15 +1036,16 @@ function drawForbiddenGridOverlay() {
 function drawDotPopulation(progress) {
   const population = dotEvolution.population;
   for (let index = population.length - 1; index >= 1; index--) {
+    if (population[index].fitness && !population[index].fitness.alive) continue;
     const quality = 1 - index / Math.max(1, population.length - 1);
     const alpha = 11 + quality * 34;
     stroke(COLORS.dotAgent[0], COLORS.dotAgent[1], COLORS.dotAgent[2], alpha);
     strokeWeight(0.7 + quality * 0.5);
     noFill();
-    drawPartialDotPath(population[index].path, progress);
+    drawPartialDotPath(population[index].trajectory ?? population[index].path, progress);
 
     if (index < 11 && progress > 0.015) {
-      const head = pointOnDotPath(population[index].path, progress);
+      const head = pointOnDotPath(population[index].trajectory ?? population[index].path, progress);
       const screen = worldToScreen(head.x, head.y);
       noStroke();
       fill(COLORS.dotAgent[0], COLORS.dotAgent[1], COLORS.dotAgent[2], 55 + quality * 80);
@@ -979,18 +1053,18 @@ function drawDotPopulation(progress) {
     }
   }
 
-  const champion = population[0];
+  const champion = population.find((agent) => !agent.fitness || agent.fitness.alive);
   if (!champion) return;
   noFill();
   stroke(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 45);
   strokeWeight(7);
-  drawPartialDotPath(champion.path, progress);
+  drawPartialDotPath(champion.trajectory ?? champion.path, progress);
   stroke(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 235);
   strokeWeight(2.3);
-  drawPartialDotPath(champion.path, progress);
+  drawBestDotPath(champion, progress);
 
   if (progress > 0.015) {
-    const head = pointOnDotPath(champion.path, progress);
+    const head = pointOnDotPath(champion.trajectory ?? champion.path, progress);
     const screen = worldToScreen(head.x, head.y);
     noStroke();
     fill(COLORS.dotChampion[0], COLORS.dotChampion[1], COLORS.dotChampion[2], 55);
@@ -1019,6 +1093,89 @@ function drawPartialDotPath(path, progress) {
     vertex(screen.x, screen.y);
   }
   endShape();
+}
+
+function drawBestDotPath(agent, progress) {
+  if (
+    params.dotTrajectory !== "spline" ||
+    typeof CubicSplineModel !== "function" ||
+    !agent?.path ||
+    agent.path.length < 2
+  ) {
+    drawPartialDotPath(agent?.trajectory ?? agent?.path, progress);
+    return;
+  }
+
+  const spline = new CubicSplineModel(agent.path, "natural");
+  const intervals = spline.intervals;
+  if (intervals.length === 0 || progress <= 0) return;
+
+  const firstX = agent.path[0].x;
+  const lastX = agent.path[agent.path.length - 1].x;
+  const endX = firstX + constrain(progress, 0, 1) * (lastX - firstX);
+  const first = intervals[0];
+  const firstScreen = worldToScreen(first.x, first.a);
+
+  beginShape();
+  vertex(firstScreen.x, firstScreen.y);
+  for (const interval of intervals) {
+    if (endX <= interval.x + 1e-9) break;
+    const intervalEnd = interval.x + interval.h;
+    const t = constrain(
+      (Math.min(endX, intervalEnd) - interval.x) / interval.h,
+      0,
+      1
+    );
+    const controls = cubicSplineBezierControls(interval);
+    const visible = t >= 1 - 1e-9 ? controls : splitBezier(controls, t).left;
+    bezierVertex(
+      visible[1].x,
+      visible[1].y,
+      visible[2].x,
+      visible[2].y,
+      visible[3].x,
+      visible[3].y
+    );
+    if (endX < intervalEnd - 1e-9) break;
+  }
+  endShape();
+}
+
+function cubicSplineBezierControls(interval) {
+  const h = interval.h;
+  const p0 = worldToScreen(interval.x, interval.a);
+  const p1 = worldToScreen(
+    interval.x + h / 3,
+    interval.a + (interval.b * h) / 3
+  );
+  const p2 = worldToScreen(
+    interval.x + (2 * h) / 3,
+    interval.a + (2 * interval.b * h) / 3 + (interval.c * h * h) / 3
+  );
+  const endY =
+    interval.a +
+    interval.b * h +
+    interval.c * h * h +
+    interval.d * h * h * h;
+  const p3 = worldToScreen(interval.x + h, endY);
+  return [p0, p1, p2, p3];
+}
+
+function splitBezier(points, t) {
+  const lerpPoint = (left, right) => ({
+    x: left.x + (right.x - left.x) * t,
+    y: left.y + (right.y - left.y) * t,
+  });
+  const p01 = lerpPoint(points[0], points[1]);
+  const p12 = lerpPoint(points[1], points[2]);
+  const p23 = lerpPoint(points[2], points[3]);
+  const p012 = lerpPoint(p01, p12);
+  const p123 = lerpPoint(p12, p23);
+  const p0123 = lerpPoint(p012, p123);
+  return {
+    left: [points[0], p01, p012, p0123],
+    right: [p0123, p123, p23, points[3]],
+  };
 }
 
 function pointOnDotPath(path, progress) {
@@ -1091,8 +1248,8 @@ function drawDotOverlay() {
   );
   text(
     best.constraintPenalty > 0
-      ? `forbidden collision penalty ${roundCoord(best.constraintPenalty)}`
-      : "trajectory is clear of the detected mask",
+      ? `trajectory is inside field; forbidden collision penalty ${roundCoord(best.constraintPenalty)}`
+      : "trajectory is inside field and clear of the detected mask",
     12,
     46
   );
@@ -1118,7 +1275,13 @@ function drawNetworkOverlay() {
   textAlign(LEFT, TOP);
 
   const activeMse =
-    params.approxMethod === "linear" ? linearMse : network ? network.mse : null;
+    params.approxMethod === "linear"
+      ? linearMse
+      : params.approxMethod === "spline"
+        ? splineMse
+        : network
+          ? network.mse
+          : null;
 
   if (params.approxMethod === "sigmoid" && network) {
     const stepText =
@@ -1142,6 +1305,13 @@ function drawNetworkOverlay() {
     text(`c=${center}  s=${scale}`, 12, 28);
     fill(...COLORS.approx);
     text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 44);
+  } else if (params.approxMethod === "spline" && splineModel) {
+    const variant = params.splineUseBSpline
+      ? `B-spline  P=${params.bsplineControlPoints}  λ=${params.bsplineSmoothing}`
+      : `natural/clamped cubic  ${params.splineBoundary}`;
+    text(variant, 12, 12);
+    fill(...COLORS.approx);
+    text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 28);
   } else {
     fill(...COLORS.approx);
     text(`MSE (${methodLabel()}) = ${formatMse(activeMse)}`, 12, 12);
@@ -1218,8 +1388,10 @@ function updateStatusMse() {
   const active =
     params.approxMethod === "linear"
       ? `active: ${activeMethodLabel} ${formatMse(linearMse)}`
-      : `active: ${activeMethodLabel} ${formatMse(network?.mse)}`;
-  const compare = `compare — linear: ${formatMse(linearMse)}  |  sigmoid: ${formatMse(sigmoidMse)}  |  Taylor: ${formatMse(taylorMse)}  |  Fourier: ${formatMse(fourierMse)}`;
+      : params.approxMethod === "spline"
+        ? `active: ${activeMethodLabel} ${formatMse(splineMse)}`
+        : `active: ${activeMethodLabel} ${formatMse(network?.mse)}`;
+  const compare = `compare — linear: ${formatMse(linearMse)}  |  sigmoid: ${formatMse(sigmoidMse)}  |  Taylor: ${formatMse(taylorMse)}  |  Fourier: ${formatMse(fourierMse)}  |  spline: ${formatMse(splineMse)}`;
   const meta = `training points: ${trainingData.length}  |  segments: ${Math.max(0, linearWaypoints.length - 1)}  |  ${anchorStatusText()}`;
   statusMseEl.textContent = `${active}  ||  ${compare}  ||  ${meta}`;
 }
@@ -1297,6 +1469,8 @@ function clearWorkspaceState({ keepAnchor = true } = {}) {
   sigmoidMse = null;
   taylorMse = null;
   fourierMse = null;
+  splineMse = null;
+  splineModel = null;
   approxXMin = null;
   approxXMax = null;
   isDrawing = false;
@@ -1395,23 +1569,7 @@ function evalLinearWaypoints(waypoints, x) {
 
 function buildTrainingData(points) {
   mergedWaypoints = mergeByX(points);
-  const samples = resampleUniform(
-    mergedWaypoints,
-    params.sampleStep,
-    activeAnchor ? [activeAnchor.point] : []
-  );
-  if (!activeAnchor) return samples;
-
-  const anchor = activeAnchor.point;
-  const existing = samples.find((point) => Math.abs(point.x - anchor.x) <= 1e-9);
-  if (existing) {
-    existing.x = anchor.x;
-    existing.y = anchor.y;
-  } else {
-    samples.push(clonePoint(anchor));
-    samples.sort((a, b) => a.x - b.x);
-  }
-  return samples;
+  return resampleUniform(mergedWaypoints, params.sampleStep);
 }
 
 function syncLinearWaypointsFromDataset() {
@@ -1428,6 +1586,35 @@ function computeMseOnData(predictFn, data) {
     sum += err * err;
   }
   return sum / data.length;
+}
+
+function buildWeightedTrainingData(data) {
+  if (!activeAnchor || data.length === 0) return data.map((point) => clonePoint(point));
+
+  const anchor = activeAnchor.point;
+  const dataMinX = data[0].x;
+  const dataMaxX = data[data.length - 1].x;
+  // Do not extend a stroke back to the soldier. If drawing starts elsewhere,
+  // A is outside the stroke's x-domain and should not affect its fit.
+  if (anchor.x < dataMinX - 1e-9 || anchor.x > dataMaxX + 1e-9) {
+    return data.map((point) => clonePoint(point));
+  }
+
+  const weighted = [];
+  let anchorIncluded = false;
+  for (const point of data) {
+    const isAnchor =
+      Math.abs(point.x - anchor.x) <= 1e-9 &&
+      Math.abs(point.y - anchor.y) <= 1e-9;
+    anchorIncluded = anchorIncluded || isAnchor;
+    const copies = isAnchor ? ACTIVE_ANCHOR_WEIGHT : 1;
+    for (let i = 0; i < copies; i++) weighted.push(clonePoint(point));
+  }
+  if (!anchorIncluded) {
+    for (let i = 0; i < ACTIVE_ANCHOR_WEIGHT; i++) weighted.push(clonePoint(anchor));
+    weighted.sort((a, b) => a.x - b.x);
+  }
+  return weighted;
 }
 
 function directLineFormula(p1, p2, useGamePrecision = false) {
@@ -1471,6 +1658,14 @@ function getActiveFormulaText() {
   if (params.inputMode === "dot") {
     const path = dotEvolution?.bestEver?.path;
     if (!path || path.length < 2) return null;
+    if (params.dotTrajectory === "spline" && typeof CubicSplineModel === "function") {
+      const decimals = Math.max(
+        8,
+        Math.min(14, Math.round(Number(params.splineFormulaPrecision) || 14))
+      );
+      const splineFormula = new CubicSplineModel(path, "natural").toFormulaText(decimals);
+      return splineFormula ? splineFormula.replace(/^y=/, "") : null;
+    }
     return clickFormulaText(path);
   }
 
@@ -1478,6 +1673,10 @@ function getActiveFormulaText() {
   let formula = null;
   if (params.approxMethod === "linear") {
     formula = linearFormulaText(linearWaypoints);
+  } else if (params.approxMethod === "spline" && splineModel) {
+    formula = splineModel.toFormulaText(
+      Math.max(8, Math.min(14, Math.round(Number(params.splineFormulaPrecision) || 14)))
+    );
   } else if (network) {
     formula = network.toDesmosText();
   }
@@ -1488,6 +1687,7 @@ function methodLabel(method = params.approxMethod) {
   if (method === "linear") return "linear";
   if (method === "taylor") return "Taylor";
   if (method === "fourier") return "Fourier";
+  if (method === "spline") return params.splineUseBSpline ? "B-spline" : "cubic spline";
   return "sigmoid";
 }
 
@@ -1579,15 +1779,16 @@ async function captureGameField() {
       );
     });
 
+    capturedActiveAnchor = data.active_anchor || null;
     clearWorkspaceState({ keepAnchor: false });
-    setActiveAnchor(data.active_anchor);
+    if (params.autoDetectActive) setActiveAnchor(capturedActiveAnchor);
     if (data.field_archive) {
       console.info(`[field archive] saved ${data.field_archive.relative_path}`);
     } else if (data.field_archive_error) {
       console.warn(`[field archive] ${data.field_archive_error}`);
     }
-    if (!data.active_anchor) {
-      console.warn("Active player was not detected; click A manually or recapture the field.");
+    if (!capturedActiveAnchor) {
+      console.warn("Active player was not detected; disable auto-detection and click A manually.");
     }
     forbiddenGrid = data.forbidden_grid ? new ForbiddenGrid(data.forbidden_grid) : null;
     forbiddenStats = data.forbidden_stats ?? null;
@@ -1619,41 +1820,25 @@ async function captureGameField() {
 }
 
 function trainSigmoidNetwork() {
+  const fitData = buildWeightedTrainingData(trainingData);
   network = new SigmoidNetwork(params.numNeurons, params.sigmoidK);
   network.initFromData(trainingData, approxXMin, approxXMax, {
     stepHeights: params.stepHeights,
   });
   network.train(
-    trainingData,
+    fitData,
     approxXMin,
     approxXMax,
     params.trainEpochs,
     params.trainLr,
     params.freezeX0
   );
-  enforceNetworkAnchor(network);
+  network.mse = computeMseOnData((x) => network.predict(x), trainingData);
   sigmoidMse = network.mse;
 }
 
-function enforceNetworkAnchor(model) {
-  if (!activeAnchor || !model || typeof model.predict !== "function") return;
-  const x = activeAnchor.point.x;
-  const y = activeAnchor.point.y;
-  const correction = y - model.predict(x);
-  if (!Number.isFinite(correction)) return;
-
-  if (Object.prototype.hasOwnProperty.call(model, "bias")) {
-    model.bias += correction;
-  } else if (Array.isArray(model.layers) && model.layers.length > 0) {
-    const output = model.layers[model.layers.length - 1];
-    if (output?.b?.length) output.b[0] += correction;
-  }
-
-  if (typeof model.sanitizeParams === "function") model.sanitizeParams();
-  if (typeof model.computeMse === "function") model.mse = model.computeMse(trainingData);
-}
-
 function trainTaylorNetwork() {
+  const fitData = buildWeightedTrainingData(trainingData);
   const activation = params.mlpActivation ?? "tanh";
   network = new TaylorNetwork(
     params.taylorOrder,
@@ -1662,12 +1847,13 @@ function trainTaylorNetwork() {
     activation
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
-  network.train(trainingData, params.trainEpochs, params.trainLr);
-  enforceNetworkAnchor(network);
+  network.train(fitData, params.trainEpochs, params.trainLr);
+  network.mse = computeMseOnData((x) => network.predict(x), trainingData);
   taylorMse = network.mse;
 }
 
 function trainFourierNetwork() {
+  const fitData = buildWeightedTrainingData(trainingData);
   const activation = params.mlpActivation ?? "tanh";
   network = new FourierNetwork(
     params.fourierHarmonics,
@@ -1676,9 +1862,21 @@ function trainFourierNetwork() {
     activation
   );
   network.initFromData(trainingData, approxXMin, approxXMax);
-  network.train(trainingData, params.trainEpochs, params.trainLr);
-  enforceNetworkAnchor(network);
+  network.train(fitData, params.trainEpochs, params.trainLr);
+  network.mse = computeMseOnData((x) => network.predict(x), trainingData);
   fourierMse = network.mse;
+}
+
+function trainSplineModel() {
+  network = null;
+  splineModel = params.splineUseBSpline
+    ? new BSplineModel(
+        buildWeightedTrainingData(trainingData),
+        params.bsplineControlPoints,
+        params.bsplineSmoothing
+      )
+    : new CubicSplineModel(trainingData, params.splineBoundary);
+  splineMse = computeMseOnData((x) => splineModel.predict(x), trainingData);
 }
 
 function processPipeline({ logFormula = false } = {}) {
@@ -1692,6 +1890,8 @@ function processPipeline({ logFormula = false } = {}) {
     sigmoidMse = null;
     taylorMse = null;
     fourierMse = null;
+    splineMse = null;
+    splineModel = null;
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";
@@ -1710,8 +1910,12 @@ function processPipeline({ logFormula = false } = {}) {
     trainTaylorNetwork();
   } else if (params.approxMethod === "fourier") {
     trainFourierNetwork();
+  } else if (params.approxMethod === "spline") {
+    trainSplineModel();
   } else {
     network = null;
+    splineMse = null;
+    splineModel = null;
   }
 
   updateStatusMse();
@@ -1761,11 +1965,6 @@ function lineWorld(x1, y1, x2, y2) {
 function mousePressed() {
   if (!mouseInsideCanvas()) return;
 
-  if (activeAnchor && isOverAnchor(mouseX, mouseY)) {
-    draggingAnchor = true;
-    return false;
-  }
-
   if (params.inputMode === "click") {
     if (mouseButton === RIGHT) {
       undoLastClick();
@@ -1787,7 +1986,7 @@ function mousePressed() {
   }
 
   isDrawing = true;
-  drawnPoints = activeAnchor ? [anchorPoint()] : [];
+  drawnPoints = [];
   mergedWaypoints = [];
   linearWaypoints = [];
   trainingData = [];
@@ -1796,6 +1995,8 @@ function mousePressed() {
   sigmoidMse = null;
   taylorMse = null;
   fourierMse = null;
+  splineMse = null;
+  splineModel = null;
   approxXMin = null;
   approxXMax = null;
   if (statusMseEl) statusMseEl.textContent = "MSE: —";
@@ -1804,19 +2005,11 @@ function mousePressed() {
 }
 
 function mouseDragged() {
-  if (draggingAnchor) {
-    updatePointAnchor(screenToWorld(mouseX, mouseY));
-    return;
-  }
   if (params.inputMode !== "draw" || !isDrawing || !mouseInsideCanvas()) return;
   addPointAtMouse();
 }
 
 function mouseReleased() {
-  if (draggingAnchor) {
-    draggingAnchor = false;
-    return;
-  }
   if (params.inputMode !== "draw" || !isDrawing) return;
   isDrawing = false;
   finishDrawing();
@@ -1826,6 +2019,10 @@ function addPointAtMouse() {
   const w = screenToWorld(mouseX, mouseY);
   w.x = constrain(w.x, X_MIN, X_MAX);
   w.y = constrain(w.y, Y_MIN, Y_MAX);
+  if (params.drawForwardOnly && drawnPoints.length > 0) {
+    const furthestX = drawnPoints.reduce((maxX, point) => Math.max(maxX, point.x), drawnPoints[0].x);
+    w.x = Math.max(w.x, furthestX);
+  }
   if (drawnPoints.length > 0) {
     const prev = drawnPoints[drawnPoints.length - 1];
     const dx = w.x - prev.x;
@@ -1833,6 +2030,15 @@ function addPointAtMouse() {
     if (dx * dx + dy * dy < 0.02) return;
   }
   drawnPoints.push(w.copy());
+}
+
+function clampDrawnPointsToForwardX() {
+  if (drawnPoints.length < 2) return;
+  let furthestX = drawnPoints[0].x;
+  for (let i = 1; i < drawnPoints.length; i++) {
+    drawnPoints[i].x = Math.max(drawnPoints[i].x, furthestX);
+    furthestX = drawnPoints[i].x;
+  }
 }
 
 function isUndoShortcut() {
@@ -1875,7 +2081,7 @@ function keyPressed() {
       clearDotPoints();
       return false;
     }
-    drawnPoints = activeAnchor ? [anchorPoint()] : [];
+    drawnPoints = [];
     mergedWaypoints = [];
     linearWaypoints = [];
     trainingData = [];
@@ -1884,6 +2090,8 @@ function keyPressed() {
     sigmoidMse = null;
     taylorMse = null;
     fourierMse = null;
+    splineMse = null;
+    splineModel = null;
     approxXMin = null;
     approxXMax = null;
     if (statusMseEl) statusMseEl.textContent = "MSE: —";

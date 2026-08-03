@@ -2,7 +2,7 @@
 Player detection helpers for GraphBot.
 
 Configs are split:
-  active_config.json  — red glow / active player matching
+  active_config.json  — yellow-body / circular active-marker matching
   players_config.json — all player circles (same size for everyone)
 """
 
@@ -34,6 +34,19 @@ DEFAULT_ACTIVE_PARAMS = {
     "left_side_only": 1,
     "refine_scale": 10,
     "review_uncertainty_game": 0.05,
+    # The lower yellow body is stable across hats/eyes/name labels. It is
+    # used only to locate player candidates; activity is decided by the
+    # circular red indicator around that candidate.
+    "yellow_h_low": 15,
+    "yellow_h_high": 45,
+    "yellow_s_min": 100,
+    "yellow_v_min": 100,
+    "yellow_min_area": 45,
+    "yellow_max_area": 220,
+    "yellow_center_offset_y": 4.3,
+    "ring_inner_offset": 1.0,
+    "ring_outer_offset": 7.0,
+    "ring_min_score": 0.45,
 }
 
 DEFAULT_PLAYERS_PARAMS = {
@@ -143,6 +156,16 @@ def sanitize_active_params(params):
     p["left_side_only"] = 1 if int(p["left_side_only"]) else 0
     p["refine_scale"] = max(1, min(20, int(p["refine_scale"])))
     p["review_uncertainty_game"] = max(0.01, min(1.0, float(p["review_uncertainty_game"])))
+    p["yellow_h_low"] = max(0, min(179, int(p["yellow_h_low"])))
+    p["yellow_h_high"] = max(p["yellow_h_low"] + 1, min(180, int(p["yellow_h_high"])))
+    p["yellow_s_min"] = max(0, min(255, int(p["yellow_s_min"])))
+    p["yellow_v_min"] = max(0, min(255, int(p["yellow_v_min"])))
+    p["yellow_min_area"] = max(1, int(p["yellow_min_area"]))
+    p["yellow_max_area"] = max(p["yellow_min_area"], int(p["yellow_max_area"]))
+    p["yellow_center_offset_y"] = max(0.0, min(12.0, float(p["yellow_center_offset_y"])))
+    p["ring_inner_offset"] = max(0.0, min(10.0, float(p["ring_inner_offset"])))
+    p["ring_outer_offset"] = max(p["ring_inner_offset"] + 1.0, min(20.0, float(p["ring_outer_offset"])))
+    p["ring_min_score"] = max(0.0, min(1.0, float(p["ring_min_score"])))
     return p
 
 
@@ -263,6 +286,108 @@ def detect_red_glow_mask(bgr, params):
         mask = cv2.dilate(mask, kernel, iterations=dilate)
 
     return mask
+
+
+def detect_yellow_player_candidates(bgr, params):
+    """Find player centers from the stable yellow lower body of each sprite.
+
+    This intentionally ignores the hat, eye, name text, and the active red
+    indicator. The returned center is shifted upward from the yellow blob to
+    the center of the circular player body.
+    """
+    params = sanitize_active_params(params)
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    lower = np.array(
+        [int(params["yellow_h_low"]), int(params["yellow_s_min"]), int(params["yellow_v_min"])],
+        dtype=np.uint8,
+    )
+    upper = np.array([int(params["yellow_h_high"]), 255, 255], dtype=np.uint8)
+    mask = cv2.inRange(hsv, lower, upper)
+
+    count, _, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+    candidates = []
+    min_area = int(params["yellow_min_area"])
+    max_area = int(params["yellow_max_area"])
+    for index in range(1, count):
+        x, y, width, height, area = (int(value) for value in stats[index])
+        if not (min_area <= area <= max_area):
+            continue
+        if width < 8 or height < 8 or width > 24 or height > 24:
+            continue
+        aspect = width / max(1.0, float(height))
+        if aspect < 0.55 or aspect > 1.6:
+            continue
+        center_x, center_y = (float(value) for value in centroids[index])
+        candidates.append(
+            (
+                center_x,
+                center_y - float(params["yellow_center_offset_y"]),
+                8.0,
+            )
+        )
+
+    # A sprite can be split into two yellow components at a screen edge or
+    # after antialiasing. Keep the strongest spatially distinct candidates.
+    candidates.sort(key=lambda point: point[0])
+    deduped = []
+    for candidate in candidates:
+        if any(np.hypot(candidate[0] - old[0], candidate[1] - old[1]) < 5.0 for old in deduped):
+            continue
+        deduped.append(candidate)
+    return deduped, mask
+
+
+def score_active_ring(red_mask, candidate, params):
+    """Compare a candidate's red annulus with the circular active marker.
+
+    A name outline is mostly a horizontal arc/rectangle above the player,
+    while the active marker covers nearly all angular bins around the body.
+    The score combines radial occupancy and angular coverage, making it a
+    small shape/template match rather than a raw red-pixel count.
+    """
+    params = sanitize_active_params(params)
+    cx, cy, radius = (float(value) for value in candidate)
+    height, width = red_mask.shape[:2]
+    yy, xx = np.ogrid[:height, :width]
+    distance = np.hypot(xx - cx, yy - cy)
+    inner = radius + float(params["ring_inner_offset"])
+    outer = radius + float(params["ring_outer_offset"])
+    annulus = (distance >= inner) & (distance <= outer)
+    red = red_mask > 0
+    annulus_size = max(1, int(np.count_nonzero(annulus)))
+    occupancy = float(np.count_nonzero(red & annulus)) / annulus_size
+
+    angles = (np.arctan2(yy - cy, xx - cx) + np.pi) / (2.0 * np.pi)
+    bins = 16
+    occupied_bins = 0
+    for index in range(bins):
+        sector = annulus & (angles >= index / bins) & (angles < (index + 1) / bins)
+        if np.any(red & sector):
+            occupied_bins += 1
+    angular_coverage = occupied_bins / bins
+
+    score = 0.70 * occupancy + 0.30 * angular_coverage
+    return {
+        "score": float(score),
+        "occupancy": occupancy,
+        "angular_coverage": angular_coverage,
+        "occupied_bins": occupied_bins,
+    }
+
+
+def match_active_ring(bgr, candidates, params):
+    """Return the best circular active-marker match among player candidates."""
+    params = sanitize_active_params(params)
+    red_mask = detect_red_glow_mask(bgr, params)
+    scored = []
+    for candidate in candidates:
+        metrics = score_active_ring(red_mask, candidate, params)
+        scored.append({"candidate": candidate, **metrics})
+    scored.sort(key=lambda item: item["score"], reverse=True)
+    best = scored[0] if scored else None
+    if best is None or best["score"] < float(params["ring_min_score"]):
+        return None, red_mask, scored
+    return best, red_mask, scored
 
 
 def glow_centroid(mask, min_area, max_x=None):
@@ -558,6 +683,61 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
                 continue
             candidates.append((cx, cy, r))
 
+    # Primary detector: locate the invariant yellow body, then match the
+    # circular red active marker around that candidate. This avoids treating
+    # red name outlines as the active player's center.
+    image_candidates, yellow_mask = detect_yellow_player_candidates(bgr, active_params)
+    if active_params["left_side_only"]:
+        image_candidates = [
+            candidate for candidate in image_candidates if candidate[0] <= center_x
+        ]
+    match_candidates = image_candidates if image_candidates else candidates
+    image_match, ring_mask, image_scores = match_active_ring(
+        bgr,
+        match_candidates,
+        active_params,
+    )
+    if image_match is not None:
+        matched = tuple(float(value) for value in image_match["candidate"])
+        score = float(image_match["score"])
+        match_source = "yellow-body" if image_candidates else "player-circle"
+        confidence = min(0.99, max(0.65, 0.55 + score * 0.55))
+        active_detection = {
+            "center": (matched[0], matched[1]),
+            "source_center": (matched[0], matched[1]),
+            "ring_center": (matched[0], matched[1]),
+            "radius": matched[2],
+            "uncertainty_px": max(0.45, 1.5 - score),
+            "uncertainty_game": {
+                "x": max(0.45, 1.5 - score) * 50.0 / max(1, bgr.shape[1]),
+                "y": max(0.45, 1.5 - score) * 30.0 / max(1, bgr.shape[0]),
+            },
+            "confidence": confidence,
+            "needs_review": confidence < 0.75,
+            "method": f"{match_source}+red-ring-match",
+            "sources": [match_source, "circular-red-ring"],
+            "fit_residual_px": None,
+            "debug_scale": int(active_params["refine_scale"]),
+            "ring_score": score,
+            "ring_occupancy": float(image_match["occupancy"]),
+            "ring_angular_coverage": float(image_match["angular_coverage"]),
+        }
+        return {
+            "active": matched,
+            "method": f"{match_source}+red-ring-match",
+            "active_detection": active_detection,
+            "glow_center": glow_centroid(ring_mask, int(active_params["glow_min_area"]), max_x=glow_limit_x)[0],
+            "glow_area": glow_centroid(ring_mask, int(active_params["glow_min_area"]), max_x=glow_limit_x)[1],
+            "players": players,
+            "candidates": candidates,
+            "image_candidates": image_candidates,
+            "image_scores": image_scores,
+            "yellow_mask": yellow_mask,
+            "glow_mask": ring_mask,
+            "player_mask": player_mask,
+            "gray": gray,
+        }
+
     active = None
     method = "none"
     expected_r, _ = radius_bounds(players_params)
@@ -623,6 +803,9 @@ def find_active_player(bgr, field_width, active_params=None, players_params=None
         "glow_area": glow_area,
         "players": players,
         "candidates": candidates,
+        "image_candidates": image_candidates,
+        "image_scores": image_scores,
+        "yellow_mask": yellow_mask,
         "glow_mask": glow_mask,
         "player_mask": player_mask,
         "gray": gray,

@@ -13,6 +13,16 @@
     "match_max_dist": 17,
     "left_side_only": 1,
     "refine_scale": 10,
-    "review_uncertainty_game": 0.05
+    "review_uncertainty_game": 0.05,
+    "yellow_h_low": 15,
+    "yellow_h_high": 45,
+    "yellow_s_min": 100,
+    "yellow_v_min": 100,
+    "yellow_min_area": 45,
+    "yellow_max_area": 220,
+    "yellow_center_offset_y": 4.3,
+    "ring_inner_offset": 1.0,
+    "ring_outer_offset": 7.0,
+    "ring_min_score": 0.45
   }
 }
