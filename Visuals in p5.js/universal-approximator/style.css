@@ -67,7 +67,75 @@ canvas {
 .control-head {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 6px;
+}
+
+.control-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.control-head-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 10px;
+}
+
+.help-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid #6488bd;
+  border-radius: 50%;
+  color: #9fc9ff;
+  font-family: Georgia, serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  outline: none;
+}
+
+.help-trigger:focus-visible {
+  border-color: #c4dcff;
+  box-shadow: 0 0 0 2px rgba(100, 180, 255, 0.25);
+}
+
+.help-popup {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 220px;
+  padding: 8px 9px;
+  border: 1px solid #4d6385;
+  border-radius: 5px;
+  background: #16191f;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45);
+  color: #d8e5f7;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.help-trigger:hover .help-popup,
+.help-trigger:focus .help-popup,
+.help-trigger.is-open .help-popup {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
 
 .control-value {
@@ -96,6 +164,10 @@ canvas {
   gap: 8px;
 }
 
+.control.checkbox .control-label {
+  flex: 1 1 auto;
+}
+
 .control.checkbox input {
   width: 16px;
   height: 16px;
@@ -103,6 +175,49 @@ canvas {
 
 #btn-capture-field {
   margin-bottom: 10px;
+}
+
+#btn-copy-formula {
+  margin-bottom: 12px;
+}
+
+.action-control {
+  position: relative;
+  display: block;
+}
+
+.action-control.is-disabled {
+  cursor: not-allowed;
+}
+
+.action-control.is-disabled > button {
+  pointer-events: none;
+  cursor: not-allowed !important;
+}
+
+.disabled-reason {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 220px;
+  padding: 8px 9px;
+  border: 1px solid #4d6385;
+  border-radius: 5px;
+  background: #16191f;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45);
+  color: #d8e5f7;
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.action-control.is-disabled:hover .disabled-reason {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 #controls-panel button {
@@ -225,6 +340,10 @@ canvas {
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 8px;
+}
+
+.dot-actions .action-control {
+  min-width: 0;
 }
 
 .dot-actions button {

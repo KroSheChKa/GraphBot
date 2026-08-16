@@ -1,68 +1,190 @@
 # GraphBot
 
-> A passion project for [Graphwar](https://github.com/catabriga/graphwar) — turn what you see on the battlefield into a paste-ready mathematical function.
+> Turn a Graphwar battlefield into a mathematical trajectory.
 
-GraphBot watches the game field and builds Graphwar-compatible formulas. The **recommended workflow** is the local **web UI** (`approximator_server.py`) — **Click mode** (default), **Draw mode** with five approximation methods, and an animated genetic **Dot mode**. **`GraphBot.py`** still offers click mode (OpenCV overlay) and an **automatic mode** prototype that is **not production-ready yet**.
+**See it. Shape it. Evolve it. Export the equation.**
 
-> **Project status:** web UI click + draw = ready to use · Dot mode = first playable GA version · `GraphBot.py` auto mode = work in progress (see [Auto mode](#auto-mode-work-in-progress))
+[Graphwar](https://github.com/catabriga/graphwar) is an artillery game where mathematical functions become projectile trajectories. GraphBot is a local visual laboratory for constructing those functions: click a route, draw a curve for approximation, or search for a trajectory with an evolving population—then copy a Graphwar-ready expression.
 
-> **How GraphBot touches Graphwar:** GraphBot is an **external helper** — it does **not** modify game files, inject into the game process, read game memory, or automate gameplay. The only direct interaction with the Graphwar window is **moving it to a fixed corner** so screen capture aligns with the configured field region. Everything else is: screenshot → math → copy a formula to your clipboard. **You** paste it into Graphwar yourself.
+**[Browse GraphBot screenshots on Steam →](https://steamcommunity.com/id/*KroSheChKa*/screenshots/?appid=1899700&sort=score&browsefilter=myfiles&view=grid#scrollTop=200)**
 
-https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
+<!-- Planned hero media: docs/media/hero-demo.gif. The exact storyboard and export requirements live in docs/media/README.md. Add the asset here when it is ready; intentionally no placeholder or broken image is shown. -->
+
+## Mathematics is the weapon
+
+GraphBot is not a macro. It turns geometry into several genuinely different mathematical representations.
+
+$$
+f(x)=b+\sum_{i=1}^{N}w_i\,\sigma\bigl(k(x-x_i)\bigr)
+$$
+
+**Sigmoid network** — a trainable sum of smooth steps.
+
+$$
+f(t)=a_0+\sum_{k=1}^{K}\left(a_k\cos(k\pi t)+b_k\sin(k\pi t)\right)
+$$
+
+**Fourier features** — a harmonic vocabulary for waves and repeated shape.
+
+$$
+\operatorname{ReLU}(z)=\max(0,z)=\frac{z+|z|}{2}
+$$
+
+**Graphwar-safe export** — ReLU can be written with `abs`, rather than `max`.
+
+For search, a population of candidate trajectories is repeatedly scored and selected:
+
+$$
+\text{population}\ \longrightarrow\ \text{mutate + crossover}\ \longrightarrow\ \text{rank}\ \longrightarrow\ \text{champion}
+$$
+
+The short version is here; the implementation-facing explanation is in [the mathematics guide](docs/MATH.md).
+
+## What it does
+
+GraphBot's primary experience is a local browser UI for Windows.
+
+| Mode | Use it when | Output |
+|---|---|---|
+| **Click Mode** | You know the route and want exact waypoints. | Piecewise absolute-value segments. |
+| **Draw Mode** | You want to sketch a shape and compare mathematical fits. | A fitted formula from one of five families. |
+| **Trajectory Search** | You have a start and targets and want the computer to search. | The current evolutionary champion. |
+
+It captures the Graphwar client area off-screen, detects useful scene information, and never injects code, reads game memory, or submits shots. You remain in control of pasting and firing the expression.
+
+## See → understand → construct → encode
+
+```mermaid
+flowchart LR
+  A[Graphwar window or blank canvas] --> B[Capture and scene analysis]
+  B --> C{Construct a trajectory}
+  C --> D[Click waypoints]
+  C --> E[Draw and approximate]
+  C --> F[Trajectory Search]
+  D --> G[Graphwar expression]
+  E --> G
+  F --> G
+  G --> H[Copy to clipboard]
+```
+
+The field is normalized to approximately $x\in[-25,25]$, $y\in[-15,15]$. Capture can provide an active-player anchor and a raster forbidden mask from dark obstacles; the UI uses that mask during Trajectory Search.
+
+## Click Mode
+
+**You know where the function should go. Click the waypoints.**
+
+The first click is the active soldier; later clicks form targets in route order. GraphBot builds the path from absolute-value segments. For endpoints $(x_1,y_1)$ and $(x_2,y_2)$:
+
+$$
+d=-\frac{y_1-y_2}{2(x_2-x_1)},\qquad
+s(x)=d\left(|x-x_1|-|x-x_2|\right)
+$$
+
+This makes a compact piecewise-linear building block that Graphwar can evaluate. Click Mode's exported expression intentionally has no `y=` prefix.
+
+## Draw Mode
+
+**Draw a curve. Let several kinds of mathematics explain it.**
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/7ee4f917-a18f-490c-a105-48a06fc8f43e" alt="GraphBot preview overlay on the Graphwar field" width="720" />
+  <img src="docs/images/draw-mode-example.png" alt="A drawn target route and its Fourier approximation on a Graphwar field" width="900" />
 </p>
 
----
+The same sampled stroke can be represented by these implemented families:
 
-## Table of contents
+| Family | Intuition | Good at |
+|---|---|---|
+| **Linear segments** | Connect the sampled points directly. | Exact control and simple routes. |
+| **Sigmoid network** | Learn the weights of shifted logistic steps. | Smooth transitions and step-like shapes. |
+| **Taylor features + MLP** | Feed powers of normalized position into a linear model or small network. | Smooth global trends and nonlinear feature combinations. |
+| **Fourier features + MLP** | Feed sine/cosine harmonics into a linear model or small network. | Oscillation and wave-like structure. |
+| **Cubic spline / B-spline** | Build locally controlled piecewise cubics. | Smooth interpolation or smoothing. |
 
-- [What is Graphwar?](#what-is-graphwar)
-- [Getting started](#getting-started)
-- [Web UI (recommended)](#web-ui-recommended)
-- [How GraphBot works](#how-graphbot-works)
-  - [External tool only (no game tampering)](#external-tool-only-no-game-tampering)
-- [Click mode](#click-mode)
-- [Draw mode](#draw-mode)
-  - [From stroke to dataset](#from-stroke-to-dataset)
-  - [Linear segments (same core as click mode)](#1-linear-segments-same-core-as-click-mode)
-  - [Sigmoid network (universal approximation)](#2-sigmoid-network-universal-approximation)
-  - [Taylor features (polynomial / beta)](#3-taylor-features-polynomial--beta)
-  - [Fourier features (harmonics)](#4-fourier-features-harmonics)
-  - [Cubic spline and B-spline](#5-cubic-spline-and-b-spline)
-  - [Activation functions (Taylor / Fourier MLP)](#activation-functions-taylor--fourier-mlp)
-- [Dot mode](#dot-mode)
-- [Auto mode (work in progress)](#auto-mode-work-in-progress)
-- [Project layout](#project-layout)
-- [Roadmap](#roadmap)
-- [More to come](#more-to-come)
-- [Feedback & issues](#feedback--issues)
-- [License](#license)
+GraphBot reports the selected model's MSE and lets you retrain the neural methods after changing their controls. Taylor is a normal implemented option—not a placeholder.
 
----
+## One drawing. Five mathematical answers.
 
-## What is Graphwar?
+The planned comparison asset will keep one target stroke on screen while Linear, Sigmoid, Taylor, Fourier, and Spline/B-spline solutions take turns explaining it. Accuracy is only part of the point: the same geometry can be encoded by fundamentally different mathematical families.
 
-Graphwar is an artillery game on a Cartesian plane. You type a function; the game fires along that curve (with a vertical shift so the shot passes through your soldier). Hit enemies, avoid teammates and black obstacle circles.
+<!-- Planned comparison media: docs/media/approximators-comparison.gif. See docs/media/README.md. -->
 
-GraphBot does not replace the game — it helps you **derive** functions faster. See [`GAME_RULES.md`](GAME_RULES.md) for full Graphwar rules and syntax.
+## Function laboratory
 
-**Field limits (approx.):** `x ∈ [-25, 25]`, `y ∈ [-15, 15]`.
+### Polynomial / Taylor features
 
----
+$$
+\phi(t)=[1,t,t^2,\ldots,t^n]
+$$
 
-## Getting started
+**Good at:** smooth global structure. With zero hidden layers the result is a polynomial in normalized position; with hidden layers, GraphBot trains an MLP on those features.
 
-### Requirements
+### Fourier features
 
-| Requirement | Notes |
-|-------------|-------|
-| **Windows** | Screen capture and window APIs are Win32-specific (`pywin32`). |
-| **Python 3.10+** | Tested with dependencies in `requirements.txt`. |
-| **Graphwar** | Window title must be `Graphwar`. Keep it visible while the bot runs. |
+$$
+\phi(t)=[1,\cos(\pi t),\sin(\pi t),\ldots,\cos(K\pi t),\sin(K\pi t)]
+$$
 
-### Install
+**Good at:** periodic or oscillatory structure. Zero hidden layers yield a Fourier-like harmonic sum; hidden layers add a learned nonlinear mapping.
+
+### Sigmoid network
+
+$$
+f(x)=b+\sum_i w_i\,\sigma(k(x-x_i))
+$$
+
+**Good at:** transitions. The UI exposes the number of steps, steepness, epochs, and learning rate.
+
+### Cubic spline and B-spline
+
+$$
+S_i(x)=a_i+b_i(x-x_i)+c_i(x-x_i)^2+d_i(x-x_i)^3
+$$
+
+**Good at:** smooth local interpolation. The UI offers natural or clamped cubic splines, plus a cubic B-spline fit with configurable control-point density and smoothing.
+
+Want the derivations, coordinate conventions, and export details? Read [docs/MATH.md](docs/MATH.md).
+
+## Neural approximation, made exportable
+
+For Taylor and Fourier models, GraphBot can train a small feature MLP:
+
+```text
+normalized x → feature vector φ(x) → hidden layers + activation → y
+```
+
+Supported hidden-layer activations are **tanh, sigmoid, ReLU, Leaky ReLU, Softplus, Swish/SiLU, GELU (approximation),** and **Mish**. The formula exporter converts the selected network to expression text; for example, it expands ReLU into an `abs` identity.
+
+<p align="center">
+  <img src="docs/images/relu-graphwar-equivalence.svg" alt="ReLU and its equivalent expression using absolute value" width="640" />
+</p>
+
+<!-- Planned training media: docs/media/mlp-training.gif. See docs/media/README.md. -->
+
+## Trajectory Search
+
+**Place a start and targets. Watch candidates search for a route.**
+
+Trajectory Search is the public name for the UI's former “Dot Mode.” It describes the user outcome and stays accurate if future solvers are not genetic algorithms. The current solver is an evolutionary algorithm.
+
+<p align="center">
+  <img src="docs/images/dot-mode-example.png" alt="An evolved GraphBot trajectory navigating to enemy targets" width="900" />
+</p>
+
+Each candidate stores $y$ values at fixed, increasing $x$ control points. The first point is locked to the active soldier; candidates may be rendered as straight segments or a natural cubic spline. Selection ranks trajectories lexicographically by:
+
+1. staying inside the field;
+2. avoiding the optional detected forbidden region;
+3. hitting more targets;
+4. reducing miss distance;
+5. avoiding configured edge strips and unnecessary length.
+
+The capture pipeline can turn dark obstacle pixels into a safety-expanded occupancy grid. It is a practical collision mask, not a claim of perfect semantic understanding of every map element. Targets left of the start are unavailable because this solver deliberately moves only right.
+
+<!-- Planned evolutionary media: docs/media/automatic-search.gif. See docs/media/README.md. -->
+
+## Quick start
+
+Requirements: **Windows**, **Python 3.10+**, and a Graphwar window titled `Graphwar` if you want to capture a field.
 
 ```powershell
 git clone https://github.com/KroSheChKa/GraphBot.git
@@ -70,595 +192,36 @@ cd GraphBot
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-```
-
-### Run `GraphBot.py` (CLI overlay)
-
-Legacy / alternative entry point — click mode on the live game window with F-keys:
-
-```powershell
-python GraphBot.py
-```
-
-1. Choose **`1`** (click mode) or **`0`** (auto — experimental).
-2. Press **F1** to start, **F2** to quit.
-3. In click mode: **F3** start recording clicks, **F4** finish.
-
-See [Click mode → `GraphBot.py`](#graphbotpy-cli) for how formula building differs from the web UI.
-
-**Tip:** If detection looks wrong, tune capture with `python tools/preview_capture.py` and calibration tools under `tools/`.
-
----
-
-## Web UI (recommended)
-
-The main tool is a local p5.js app served by Python:
-
-```powershell
 python tools/approximator_server.py
 ```
 
-The server automatically opens **[http://127.0.0.1:8765/](http://127.0.0.1:8765/)** in your default browser.
+Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/) if the browser does not open automatically. Choose a mode, optionally press **Capture field**, create a trajectory, then use **Copy y**.
 
-| Mode | What it does |
-|------|----------------|
-| **1. Click mode** *(default)* | Place waypoints on the canvas; get a piecewise `direct_line` formula |
-| **2. Draw mode** | Sketch a curve, resample to a dataset, approximate with 5 methods |
-| **3. Dot mode** | Place the active soldier and unordered enemies; evolve a population of left-to-right trajectories |
+For setup, controls, calibration, and troubleshooting, see [the user guide](docs/USER_GUIDE.md). For Graphwar syntax and game behavior, see [GAME_RULES.md](GAME_RULES.md).
 
-### Shared controls
+## Status
 
-| Action | Control |
-|--------|---------|
-| Capture Graphwar field as background | **Capture field** (Graphwar must be running; window moved to corner for alignment) |
-| Active player source | **Auto-detect active player** toggle; disable it to place A manually |
-| Clear current path / stroke | **C** *(background screenshot stays)* |
-| Copy formula | **Copy y** |
-| Reset sliders & canvas state | **Reset** |
+**Stable workflows**
 
-**After «Capture field»:** any previous clicks, drawn curve, or Dot-mode population are cleared automatically — you start fresh on the new screenshot. With **Auto-detect active player** enabled, GraphBot finds the stable yellow body of each sprite and then matches the circular red active marker around it; red name outlines are not used as the anchor. The result is shown as **A** and seeds Click/Dot mode. In Draw mode the stroke starts only where you first touch the canvas; **A** never creates a line to that first touch. If A falls inside the drawn x-range, it receives a soft training weight; otherwise it is ignored for that stroke. Disable the toggle to hide the automatic marker and place **A** manually. The marker is not draggable, so drawing over it remains an ordinary canvas action.
+- Local UI with Click Mode, Draw Mode, and formula copying.
+- Draw approximators: linear, sigmoid, Taylor, Fourier, cubic spline, and B-spline.
+- Quiet Win32 field capture, active-player detection, and forbidden-mask extraction.
 
-Every successful **Capture field** also stores the clean raw field crop as a lossless PNG in the local, Git-ignored folder `data/field_captures/`. The archive is written before detection and contains no points, formulas, trajectories, masks, or UI overlays. These files are reserved for later regression tests and detector tuning.
+**Experimental / research workflows**
 
-### Field and active-player calibration
+- Trajectory Search's evolutionary solver and its obstacle interpretation.
+- The legacy `GraphBot.py` console/OpenCV program, including A*, polynomial search, and symbolic genetic search.
 
-Run `python tools/preview_capture.py`, adjust `left`, `top`, `right`, and `bottom` until the grid follows the playable area, then press **s** to save `config/capture_config.json`. The preview shows `x=-25,0,25`, `y=15,0,-15`, field size, and game-units-per-pixel.
+`GraphBot.py` remains in the repository because it contains distinct research planners not exposed by the UI. It is deliberately not the recommended entry point.
 
-For the active player, run `python tools/calibrate_active.py`. Its separate ×10 ROI window shows the refined center (green), Hough source center (yellow), and red-ring estimate (magenta). The web capture now primarily uses a yellow-body candidate plus a circular red-ring match; the old red-glow path remains a fallback for unusual frames. Press **d** to save `outputs/active_debug.png`. The ±0.05 game-unit value is a review threshold, not extra information created by enlargement; uncertainty remains limited by the original screenshot.
+## Documentation
 
-### Click mode (web UI)
-
-| Action | Control |
-|--------|---------|
-| Place active soldier | **1st click** — purple marker **A** |
-| Place targets | **2nd, 3rd… clicks** — orange markers **2**, **3**… |
-| Undo last click | **Right-click**, **Backspace**, or **Undo last click** |
-
-Formula output: **expression only, no `y=` prefix** — paste into Graphwar as-is.
-
-### Draw mode (web UI)
-
-Switch to **2. Draw mode** in the side panel, then pick an approximation method:
-
-| Method | Idea |
-|--------|------|
-| **2.1 Linear (segments)** | Exact piecewise lines through the dataset |
-| **2.2 Sigmoid network** | Sum of shifted sigmoids (universal approximation) |
-| **2.3 Taylor (polynomial)** | Polynomial features ± MLP *(beta)* |
-| **2.4 Fourier (harmonics)** | Harmonic features ± MLP |
-| **2.5 Cubic spline** | C²-smooth cubic interpolation or B-spline fit |
-
-| Action | Control |
-|--------|---------|
-| Draw target curve | Click and drag on the canvas |
-| Adjust dataset density | **Dataset step** slider |
-| Hidden-layer activation (Taylor / Fourier) | **Hidden-layer activation** — only when hidden layers ≥ 1 |
-| Retrain after parameter change | **Retrain** |
-
-Formula output: **`y=...`** (Graphwar syntax). Compare MSE in the status line before copying.
-
-Taylor and Fourier methods with **≥ 1 hidden layer** use a small MLP on feature vector $\varphi(t)$. Pick the activation in the side panel — see [Activation functions](#activation-functions-taylor--fourier-mlp).
-
----
-
-## How GraphBot works
-
-```mermaid
-flowchart LR
-  GW[Graphwar window] --> CAP[Screen capture]
-  CAP --> DET[Player / obstacle detection]
-  DET --> PATH[Waypoints, drawn curve, or evolved population]
-  PATH --> FMT[Graphwar formula]
-  FMT --> CLIP[Clipboard]
-```
-
-1. **Capture** — crop the game field via Win32 window rect + margins from `config/capture_config.json`.
-2. **Detect** — find allies, enemies, the active-player center (red glow + refined player circle), and black obstacles (OpenCV + Hough) *on the screenshot only*.
-3. **Plan** — build waypoints (click), freehand draw + resample (draw), or evolve left-to-right control-point paths (dot). *(Auto planners in `GraphBot.py` — A*, polynomial search, symbolic GA — are experimental.)*
-4. **Encode** — convert segments or approximations into Graphwar syntax and copy to clipboard.
-
-### External tool only (no game tampering)
-
-GraphBot stays **outside** Graphwar:
-
-| GraphBot does | GraphBot does **not** |
-|---------------|------------------------|
-| Take a **screenshot** of the visible game field | Edit, patch, or replace any **game files** |
-| **Move the Graphwar window** to a known screen position for consistent capture | Inject DLLs, hooks, or code into the **game process** |
-| Run **OpenCV** on the captured image | Send keystrokes/clicks **into the game** to play for you |
-| Copy a formula to the **clipboard** | Read **game memory** or network traffic |
-
-There is no autopilot that fires shots or submits functions. You still aim by typing (or pasting) the formula in Graphwar’s own UI — GraphBot only helps you **derive** that formula faster.
-
-The piecewise building block is shared between click mode and draw mode (linear segments):
-
-```409:417:GraphBot.py
-def direct_line(p1, p2):
-    x1, y1 = fmt_game(p1[0]), fmt_game(p1[1])
-    x2, y2 = fmt_game(p2[0]), fmt_game(p2[1])
-    dx = x2 - x1
-    if abs(dx) < 1e-12:
-        dx = fmt_game(vertical_eps(y1, y2)) if y1 != y2 else VERTICAL_MIN_EPS
-        x2 = fmt_game(x1 + dx)
-    dist = fmt_game(-((y1 - y2) / 2) / dx)
-    return f"{dist}*(abs(x - {x1}) - abs(x - {x2}))"
-```
-
-Each segment is a **V-shaped absolute-value line** between two points. A full path is the sum of segments.
-
----
-
-## Click mode
-
-Both click workflows build a path from **`direct_line` segments** — V-shaped absolute-value pieces between waypoints. The core formula for one segment:
-
-For endpoints $(x_1, y_1)$ and $(x_2, y_2)$:
-
-$$
-d = -\frac{y_1 - y_2}{2\,(x_2 - x_1)}, \qquad
-\text{segment}(x) = d \cdot \bigl(|x - x_1| - |x - x_2|\bigr)
-$$
-
-Full path:
-
-$$
-f(x) = \sum_i \text{segment}_i(x)
-$$
-
-**Vertical segments:** if the next waypoint has $x$ **to the left** of the previous one (Graphwar expects forward motion), GraphBot inserts a near-vertical step using a tiny $\Delta x$ — same logic in the web UI and in `GraphBot.py`'s `process_clicks_to_waypoints`.
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/e94bcb04-1525-41aa-baf6-3bdedf8124d5" alt="Click mode — placing waypoints on the field" width="720" />
-</p>
-
-### Web UI *(recommended)*
-
-1. Run [the web UI](#web-ui-recommended), optionally **Capture field**.
-2. **1st click** — your active soldier (purple **A**). You choose the position manually on the screenshot.
-3. **Next clicks** — targets (enemies, detour points) in **click order**.
-4. If a click lands **left of the previous waypoint** → vertical segment is inserted automatically.
-5. **Copy y** — copies the expression **without `y=`**, e.g.:
-
-```
--1.2*(abs(x - -18.5) - abs(x - -5.2)) + 0.8*(abs(x - -5.2) - abs(x - 12.1))
-```
-
-Paste into Graphwar. In normal mode the game still adds its own vertical shift (`+c`) so the shot passes through your soldier.
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/0ef7b1f7-0342-4c67-96f0-3e5dab0feb5d" alt="Piecewise linear path built from V-shaped segments" width="720" />
-</p>
-
-### `GraphBot.py` (CLI)
-
-1. Start `GraphBot.py`, choose mode **`1`**, press **F1**.
-2. **F3** — start recording clicks on the **live game field**; **F4** — done.
-3. Click **targets only** on the field (clicks outside the capture region are ignored).
-4. GraphBot **auto-detects** the active soldier (red glow + OpenCV), **sorts targets by `x`**, builds `soldier → target₁ → target₂ → …`.
-5. Formula copied to clipboard — **no `y=` prefix**.
-
-If active-player detection fails, tune `tools/calibrate_active.py`.
-
-| | Web UI click mode | `GraphBot.py` click mode |
-|--|-------------------|--------------------------|
-| Where you click | Canvas (after screenshot) | Live Graphwar window |
-| Active soldier | **Manual** 1st click (**A**) | **Auto-detected** from screenshot |
-| Target order | Click order + vertical-left rule | Sorted by `x` |
-| Formula prefix | none | none |
-
----
-
-## Draw mode
-
-Draw mode lives in the [web UI](#web-ui-recommended) only. Sketch a curve, sample it into a dataset, and approximate with one of five methods.
-
-<p align="center">
-  <img src="docs/images/draw-mode-example.png" alt="Draw mode building a Fourier approximation from sampled curve points" width="900" />
-</p>
-
-<p align="center"><em>Draw mode — sampled curve points and the resulting Fourier approximation on a captured Graphwar field.</em></p>
-
-### From stroke to dataset
-
-```mermaid
-flowchart TD
-  A[Mouse draw on canvas] --> B[Merge points with same x]
-  B --> C[Uniform resample with sample step]
-  C --> D[Training dataset blue points]
-  D --> E{Approximation method}
-  E --> L[Linear segments]
-  E --> S[Sigmoid network]
-  E --> T[Taylor MLP]
-  E --> F[Fourier MLP]
-  E --> C[Cubic spline / B-spline]
-```
-
-1. **Draw** — freehand stroke in game coordinates (`x: -25…25`, `y: -15…15`).
-2. **Merge** — points with nearly equal `x` are averaged (stable vertical strokes).
-3. **Resample** — uniform steps along `x` controlled by **dataset step** (`sampleStep`). More points → more linear segments; smoother target for neural approximators.
-4. **Approximate** — pick a method; compare MSE in the panel; copy the winning formula.
-
-Enable **Prevent backward drawing (x only increases)** when the stroke must behave like a function moving from left to right. If the cursor goes left, its `x` position is locked to the furthest point already reached while `y` can still move vertically; the stroke never creates a backward segment.
-
-The red curve is your intent; blue dots are the dataset; green is the approximation.
-
----
-
-### 1. Linear segments (same core as click mode)
-
-Connect consecutive **dataset points** with the same `direct_line` formula as click mode. Segment count ≈ `dataset points − 1`.
-
-**When to use:** You want an exact piecewise path through the samples — same math as click mode, but waypoints come from drawing instead of clicking.
-
-$$
-y = \sum_{k=1}^{N-1} d_k \cdot \bigl(|x - x_k| - |x - x_{k+1}|\bigr)
-$$
-
-<p align="center">
-  <img src="docs/images/draw-mode-linear.png" alt="Linear segment approximation (add screenshot here)" width="720" />
-</p>
-
----
-
-### 2. Sigmoid network (universal approximation)
-
-A shallow network of shifted sigmoids — inspired by the **universal approximation theorem**: a sum of sigmoids can approximate wide classes of curves.
-
-**Model:**
-
-$$
-y(x) = b + \sum_{i=1}^{N} w_i \cdot \sigma\!\bigl(k \cdot (x - x_{0,i})\bigr),
-\qquad
-\sigma(z) = \frac{1}{1 + e^{-z}}
-$$
-
-**Graphwar export** uses the logistic form:
-
-$$
-y = b + \sum_i \frac{w_i}{1 + \exp\!\bigl(-k\,(x - x_{0,i})\bigr)}
-$$
-
-| Parameter | Role |
-|-------------|------|
-| `numNeurons` | Number of sigmoid steps |
-| `sigmoidK` | Sharpness of each step |
-| `stepHeights` | Initialize $w_i$ from target height jumps at each $x_{0,i}$ |
-| `freezeX0` | Keep uniform neuron positions while training weights |
-
-<p align="center">
-  <img src="docs/images/draw-mode-sigmoid.png" alt="Sigmoid approximation (add screenshot here)" width="720" />
-</p>
-
-<!-- Optional: diagram of stacked sigmoids -->
-<!-- <img src="docs/images/sigmoid-universal-approximation-diagram.png" alt="Universal approximation with sigmoids" width="640" /> -->
-
----
-
-### 3. Taylor features (polynomial / beta)
-
-Polynomial features around a scaled origin — related to a **Taylor expansion** mindset: local behavior encoded by powers of $t$.
-
-**Features:**
-
-$$
-t = \frac{x - c}{s}, \qquad
-\varphi(t) = \bigl[1,\; t,\; t^2,\; \ldots,\; t^n\bigr]
-$$
-
-**With hidden layers:** $\varphi(t) \rightarrow \text{MLP with chosen activation} \rightarrow y$ (see [Activation functions](#activation-functions-taylor--fourier-mlp))
-
-**With 0 hidden layers:** pure polynomial in $t$ (expanded to powers of $x$ for Graphwar export).
-
-| Parameter | Role |
-|-------------|------|
-| `taylorOrder` | Highest power $n$ |
-| `taylorHiddenLayers` | `0` = pure polynomial; `>0` = MLP on features |
-| `taylorHiddenSize` | Width of hidden layers |
-| `mlpActivation` | Nonlinearity between hidden layers (`tanh`, `ReLU`, `Swish`, …) |
-
-<p align="center">
-  <img src="docs/images/draw-mode-taylor.png" alt="Taylor feature approximation (add screenshot here)" width="720" />
-</p>
-
----
-
-### 4. Fourier features (harmonics)
-
-Trigonometric basis — same spirit as a **Fourier series** on a normalized interval:
-
-$$
-t = \frac{x - c}{s}, \qquad
-\varphi(t) = \bigl[1,\; \cos(\pi t),\; \sin(\pi t),\; \cos(2\pi t),\; \sin(2\pi t),\; \ldots\bigr]
-$$
-
-**With 0 hidden layers:** linear combination of harmonics (Fourier-like sum).
-
-**With hidden layers:** richer expressivity via MLP on $\varphi(t)$ and a configurable activation (same list as Taylor — [below](#activation-functions-taylor--fourier-mlp)).
-
-| Parameter | Role |
-|-------------|------|
-| `fourierHarmonics` | Number of harmonic pairs $K$ |
-| `fourierHiddenLayers` | `0` = pure harmonic sum |
-| `fourierHiddenSize` | Hidden layer width when MLP is used |
-| `mlpActivation` | Nonlinearity between hidden layers |
-
-<p align="center">
-  <img src="docs/images/draw-mode-fourier.png" alt="Fourier feature approximation (add screenshot here)" width="720" />
-</p>
-
----
-
-### 5. Cubic spline and B-spline
-
-The default cubic spline is an interpolating, piecewise-cubic curve with continuous first and second derivatives (`C²`). The **Natural** boundary condition sets the second derivative to zero at both ends; **Clamped** uses zero first derivatives at the ends. This follows the standard cubic-spline boundary-condition formulation. [SciPy CubicSpline reference](https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.CubicSpline.html)
-
-Enable **Use B-spline basis** for a compact least-squares spline with a uniform clamped knot vector. Its controls are:
-
-| Parameter | Role |
-|-----------|------|
-| **B-spline control points** | More points increase detail/fit capacity; fewer points smooth the curve |
-| **B-spline smoothing λ** | Ridge regularization; `0` follows the data most closely, larger values smooth more |
-| **Curve precision (plot step)** | Preview sampling step; smaller values make the displayed curve denser |
-| **Formula decimals** | Number of decimal places retained in the copied Graphwar formula; spline export defaults to 14 because basis terms accumulate rounding errors |
-
-The copied result is converted to Graphwar-safe arithmetic using `abs`, `+`, `-`, `*`, `/`, and `^`; it does not require a piecewise-function operator.
-
----
-
-### Activation functions (Taylor / Fourier MLP)
-
-When **Taylor** or **Fourier** uses **≥ 1 hidden layer**, the web UI trains a small MLP on feature vector $\varphi(t)$. Choose the nonlinearity in **Hidden-layer activation** (disabled at 0 hidden layers — then the model is purely linear on $\varphi$).
-
-| Activation | Notes |
-|------------|--------|
-| **tanh** | Default; smooth, bounded |
-| **sigmoid (σ)** | Classic logistic |
-| **ReLU** | Common in modern nets; see Graphwar export below |
-| **Leaky ReLU** | Small slope on $x < 0$ |
-| **Softplus** | Smooth ReLU-like: $\ln(1 + e^x)$ |
-| **Swish / SiLU** | $x \cdot \sigma(x)$ — popular in EfficientNet-style models |
-| **GELU (approx)** | Transformer-style nonlinearity |
-| **Mish** | $x \cdot \tanh(\ln(1 + e^x))$ — used in many modern detectors |
-
-All exported formulas use **only** Graphwar builtins: `+`, `-`, `*`, `/`, `^`, `sqrt`, `log`, `ln`, `abs`, `sin`, `cos`, `tan`, `exp`. There is **no** `max()` or `min()` in the game ([`GAME_RULES.md`](GAME_RULES.md)).
-
-#### ReLU without `max()`
-
-Standard ReLU is $\mathrm{ReLU}(x) = \max(0, x)$. Graphwar cannot parse `max`, so GraphBot exports the equivalent form:
-
-$$
-\max(0, x) = \frac{x + |x|}{2}
-$$
-
-For $x \ge 0$: $|x| = x$ → $(x + x)/2 = x$. For $x < 0$: $|x| = -x$ → $(x - x)/2 = 0$.
-
-<p align="center">
-  <img src="docs/images/relu-graphwar-equivalence.svg" alt="ReLU: max(0,x) and (x+|x|)/2 are the same curve" width="640" />
-</p>
-
-*Solid blue:* $\max(0, x)$ (used internally while training). *Dashed red:* $(x + |x|)/2$ (what you paste into Graphwar). Same graph.
-
-**Example in a formula** (hidden pre-activation $z$):
-
-```
-((z)+abs(z))/2
-```
-
-Leaky ReLU uses the same trick: $\max(0,z) + \alpha\min(0,z)$ is written with `abs(z)` only — no `max`/`min`.
-
----
-
-## Dot mode
-
-Dot mode is the animated genetic-search workflow in the web UI:
-
-1. Switch to **3. Dot mode**.
-2. Click the active soldier first (**A**), then click enemy targets in any order.
-3. Press **Start evolution** and watch each population grow from A across the field.
-4. Choose **Straight segments** or **Cubic spline**, stop when satisfied, and use **Copy y** to copy the best agent as a Graphwar expression.
-
-Each genome stores `y` values at a fixed, increasing sequence of `x` control points. The first gene is locked to the active soldier and every other value is clamped to `[-15, 15]`. For cubic splines, the sampled curve is checked as well: any trajectory that leaves the field is killed and never displayed or selected. Selection is lexicographic: keep in-bounds agents alive, maximize target hits, minimize distance to missed targets, avoid the optional outer edge strips, then prefer shorter curves. Targets use the configurable **Hit radius** rather than exact point equality.
-
-| Control | Effect |
-|---------|--------|
-| **Population** | Number of visible agents per generation |
-| **Control points** | Genome/path resolution and spline control-point count |
-| **Trajectory** | Evaluate and export either straight segments or a natural cubic spline through the evolved control points |
-| **Spline samples / segment** | Collision and target-distance sampling density for cubic-spline trajectories |
-| **Hit radius** | Circle around each enemy that counts as a hit (`0.05–0.25` game units) |
-| **Mutation scale** | Size of random changes between generations |
-| **Edge penalty offset** | Places neutral-zone lines inward from `y = ±15`; only trajectory samples beyond them are penalized |
-| **Generation time** | How long one animated generation remains on screen |
-
-Blue trails are the current population; the green trail is the current champion. Right-click, Backspace, or Ctrl+Z removes the last point; Space toggles evolution. Targets left of A are marked as unreachable because this first version never moves backward in `x`.
-
-### Dot mode in action
-
-<p align="center">
-  <img src="docs/images/dot-mode-example.png" alt="Dot mode genetic algorithm planning a safe trajectory through all targets" width="900" />
-</p>
-
-<p align="center"><em>1. Planner result — the evolved champion hits all targets while avoiding the detected forbidden mask.</em></p>
-
-<p align="center">
-  <img src="docs/images/GA-ingame.jpg" alt="Dot mode trajectory fired in Graphwar" width="760" />
-</p>
-
-<p align="center"><em>2. In-game result — the exported piecewise function reproduced the planned trajectory in Graphwar.</em></p>
-
-After **Capture field**, Python extracts a raster forbidden-mask from black pixels, removes detected players and thin graph strokes, adds a safety margin, and sends a compact occupancy grid to the browser. Dot mode shows it as a translucent red overlay. Safe agents lexicographically outrank every colliding agent; hit count and missed-target distance still outrank the edge-strip penalty, so a necessary border route remains available.
-
-### Forbidden-mask configurator
-
-Tune and inspect the exact data used by Dot mode:
-
-```powershell
-python tools/calibrate_forbidden_mask.py
-```
-
-You can also open a saved field image:
-
-```powershell
-python tools/calibrate_forbidden_mask.py path\to\field.png
-```
-
-The dashboard keeps four views together:
-
-1. Original field with final forbidden area in red.
-2. Raw pixels accepted by the black threshold.
-3. Clean connected areas in green plus the safety expansion in red.
-4. The exact occupancy grid transferred to JavaScript.
-
-| Key | Action |
-|-----|--------|
-| **Space** | Freeze/unfreeze the current live field |
-| **F** | Toggle removal of detected players |
-| **S** | Save `config/forbidden_config.json` |
-| **D** | Export source, intermediate masks, dashboard and JSON report to `outputs/` |
-| **R** | Restore default mask parameters |
-
-The raster mask is the collision source of truth: overlapping or nested circles may merge into one connected area without losing their forbidden pixels. Hough circle reconstruction is not used by Dot mode.
-
-> **Current boundary:** player filtering still depends partly on the existing player-circle detector. Dot mode additionally ignores a small area around manually clicked A/enemy points so imperfect player removal does not make valid hits impossible.
-
----
-
-## Auto mode (work in progress)
-
-> **Status: in development.** Auto mode is not the main focus of the project yet. Core pieces exist (screen capture, player detection, preview overlay, prototype planners), but gameplay-critical behavior is still missing or unreliable — teammate filtering, accurate enemy radius, black-circle avoidance, and stable active-player detection are all on the [roadmap](#roadmap).
-
-Automatic mode (`0` at startup) tries to detect enemies and build formulas without manual input. Treat it as a **preview of what's coming**, not a finished autopilot.
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/16caabb1-507c-4a7a-bde9-aedb832485d9" alt="Player detection overlay" width="720" />
-</p>
-
-### Known limitations (today)
-
-| Area | Current state |
-|------|----------------|
-| Teammates | Left/right split only — may route through allies |
-| Enemies | Aims at circle **centers**, not full hit radius |
-| Black obstacles | Detection exists but auto routing is **not fully wired** |
-| Active player | Yellow-body + circular red-marker matching; red-glow path remains a fallback |
-| UX | Busy-wait on F-keys; formula loop is rough around the edges |
-
-### Planners (experimental)
-
-| Planner | Description | Maturity |
-|---------|-------------|----------|
-| **A* chain** | Path through enemy centers; obstacle avoidance partially implemented | Prototype |
-| **Polynomial search** | Sample and mutate polynomials anchored at your soldier; score by hits and penalties | Experimental |
-| **Symbolic GA** | Evolve Graphwar-like expressions on live scene data | Experimental |
-
-Polynomial candidate form:
-
-$$
-y = y_0 + a_1(x - x_0) + a_2(x - x_0)^2 + a_3(x - x_0)^3 + a_4(x - x_0)^4
-$$
-
-Updates roughly every second while Graphwar is visible. Press **F2** to quit.
-
-**For reliable results right now, use the [web UI](#web-ui-recommended) or [`GraphBot.py` click mode](#graphbotpy-cli).**
-
----
-
-## Project layout
-
-```
-GraphBot/
-├── GraphBot.py              # Main bot (auto + click modes)
-├── core/                    # Capture, detection, pathfinding, planners
-├── config/                  # JSON configs (capture, players, obstacles)
-├── tools/
-│   ├── approximator_server.py   # Web UI server (click + draw + dot modes)
-│   ├── calibrate_forbidden_mask.py # Raster forbidden-area dashboard
-│   ├── preview_capture.py       # Debug capture region
-│   └── calibrate_*.py           # Tune detection parameters
-├── Visuals in p5.js/
-│   └── universal-approximator/  # Web UI (p5.js + training + Dot-mode GA)
-├── docs/images/             # README screenshots (add yours here)
-├── GAME_RULES.md            # Graphwar rules reference
-├── TODO.md                  # Detailed dev notes
-└── outputs/                 # Local logs / temp artifacts (gitignored)
-```
-
----
-
-## Roadmap
-
-High-level checklist distilled from [`TODO.md`](TODO.md). Detailed notes stay in that file.
-
-> **Focus:** most open items below are **auto mode** blockers. Click mode and draw mode are usable today; Dot mode is an evolving first version; auto mode should not be expected to play rounds reliably until these land.
-
-### Auto mode (in development)
-
-- [ ] **Teammate avoidance (auto)** — distinguish allies from enemies beyond left/right split; never route through teammates.
-- [ ] **Enemy as a circle** — use radius from Hough, not just center; one segment may hit multiple nearby enemies.
-- [ ] **Black obstacle avoidance (auto)** — enable `detect_black_circles()` in auto mode; pathfind around lethal circles.
-- [x] **Active player detection** — match the circular active marker around color-stable player candidates; keep manual toggle/fallback.
-
-### UX & tooling
-
-- [ ] **Keyboard UX** — replace F1/F3/F4 busy-wait with OpenCV `waitKey`; stay alive after click-mode formula instead of exiting.
-- [ ] **Calibration suite** — sliders for Hough thresholds, glow mask, field margins; export JSON for `GraphBot.py`.
-- [ ] **Dynamic field bounds** — derive capture rect from window size instead of hard-coded margins.
-
-### Done recently
-
-- [x] **Dot mode v1:** animated populations, lexicographic fitness, start/stop controls, and champion formula export
-- [x] **Dot obstacle avoidance:** calibrated raster mask, compact grid transfer, safety-first GA fitness
-- [x] **Draw mode:** activation picker for Taylor / Fourier MLP (`tanh`, `ReLU`, `Swish`, `GELU`, `Mish`, …)
-- [x] **Active-player detection v2:** yellow-body candidates + circular red-marker matching; manual/automatic UI toggle
-- [x] **Graphwar-safe ReLU export** — `max(0,x)` → `(x+|x|)/2` in copied formulas
-- [x] Web UI with **Click mode** (default) + **Draw mode** (5 approximation methods) + **Dot mode**
-- [x] Click mode: manual soldier (**A**), vertical segments on left-click, formula without `y=`
-- [x] Field capture resets previous clicks / strokes in the web UI
-- [x] Graceful handling when no players are detected (`GraphBot.py`)
-- [x] Click-mode vertical segments in `GraphBot.py` (`process_clicks_to_waypoints`)
-- [x] Win32 field capture + `capture_config.json`
-- [x] Partial calibration tools (`preview_capture`, `calibrate_active`, `calibrate_players`)
-
----
-
-## More to come
-
-This repo is actively evolving — a **pet project** built for fun and learning, not a finished product.
-
-The biggest active effort is **auto mode** — obstacle routing, teammate logic, and trustworthy detection. Draw mode and click mode will keep improving too. If you have ideas (especially for auto planners), I'd love to hear them.
-
----
-
-## Feedback & issues
-
-Something broken? Open an [**Issue**](https://github.com/KroSheChKa/GraphBot/issues) with steps to reproduce, your Windows version, and a screenshot if possible.
-
-Have a feature idea or math trick worth adding? Same place — [**Issues**](https://github.com/KroSheChKa/GraphBot/issues) or a PR. All constructive feedback welcome.
-
----
+- [Mathematics](docs/MATH.md) — models, neural features, search, and export.
+- [User Guide](docs/USER_GUIDE.md) — operating the UI, capture, calibration, and fixes.
+- [Graphwar Rules](GAME_RULES.md) — game modes and expression constraints.
+- [Showcase media plan](docs/media/README.md) — stable filenames and animation storyboards.
+- [Roadmap](TODO.md) — implementation work still planned.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
-
-Built with curiosity for Graphwar, OpenCV, and a bit of approximation theory.
+MIT. See [LICENSE](LICENSE).

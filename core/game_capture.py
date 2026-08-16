@@ -3,13 +3,12 @@ Capture a color screenshot of the Graphwar game field for the approximator UI.
 """
 
 import base64
-import time
+import ctypes
 
 import cv2
-import mss
 import numpy as np
-import win32con
 import win32gui
+import win32ui
 
 from core.detection import find_active_player, load_active_params, load_players_params
 from core.forbidden_mask import build_forbidden_mask, load_forbidden_params
@@ -22,9 +21,16 @@ from core.window_capture import (
     load_capture_margins,
 )
 
-DEFAULT_WINDOW_POSITION = (-7, 0)
-SETTLE_SEC = 0.2
 GAME_PRECISION = 5
+PW_CLIENTONLY = 0x00000001
+
+
+def _print_window(hwnd, device_context):
+    """Call PrintWindow from user32 (not exported by every pywin32 build)."""
+    user32 = ctypes.windll.user32
+    user32.PrintWindow.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint]
+    user32.PrintWindow.restype = ctypes.c_bool
+    return bool(user32.PrintWindow(hwnd, device_context, PW_CLIENTONLY))
 
 
 def fmt_game(value):
@@ -36,41 +42,66 @@ def field_to_game(field_x, field_y, field_width, field_height):
     return fmt_game(game_x), fmt_game(game_y)
 
 
-def focus_game_window(hwnd):
-    if not hwnd:
-        return False
+def grab_client_bgr(hwnd):
+    """Render a window's client area off-screen using Win32 ``PrintWindow``.
 
-    if win32gui.IsIconic(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    Unlike a desktop grab, this does not activate, move, or uncover Graphwar.
+    It also means another application's pixels can never accidentally become a
+    Graphwar field capture.  Some applications decline ``PrintWindow``; callers
+    receive an error in that case rather than a misleading desktop screenshot.
+    """
+    _, _, width, height = win32gui.GetClientRect(hwnd)
+    if width < 1 or height < 1:
+        raise RuntimeError("Game window has no drawable client area")
 
+    window_dc_handle = None
+    window_dc = None
+    memory_dc = None
+    bitmap = None
+    previous_bitmap = None
     try:
-        win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
-        win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
-        return True
-    except Exception:
-        return False
+        window_dc_handle = win32gui.GetWindowDC(hwnd)
+        window_dc = win32ui.CreateDCFromHandle(window_dc_handle)
+        memory_dc = window_dc.CreateCompatibleDC()
+        bitmap = win32ui.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(window_dc, width, height)
+        previous_bitmap = memory_dc.SelectObject(bitmap)
+
+        # PW_CLIENTONLY: bitmap coordinates are exactly GetClientRect(), so
+        # configured capture margins remain client-relative.
+        if not _print_window(hwnd, memory_dc.GetSafeHdc()):
+            raise RuntimeError("Windows could not render the Graphwar window off-screen")
+
+        bgra = np.frombuffer(bitmap.GetBitmapBits(True), dtype=np.uint8)
+        bgra = bgra.reshape((height, width, 4))
+        return cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
+    finally:
+        if memory_dc is not None and previous_bitmap is not None:
+            memory_dc.SelectObject(previous_bitmap)
+        if bitmap is not None:
+            win32gui.DeleteObject(bitmap.GetHandle())
+        if memory_dc is not None:
+            memory_dc.DeleteDC()
+        if window_dc is not None:
+            window_dc.DeleteDC()
+        if window_dc_handle is not None:
+            win32gui.ReleaseDC(hwnd, window_dc_handle)
 
 
-def move_game_window(hwnd, target_x, target_y):
-    if not hwnd:
-        return False
-
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    width = right - left
-    height = bottom - top
-
-    if left == target_x and top == target_y:
-        return False
-
-    win32gui.MoveWindow(hwnd, target_x, target_y, width, height, True)
-    return True
-
-
-def grab_field_bgr(field):
-    with mss.mss() as sct:
-        shot = np.array(sct.grab(field))
-    return cv2.cvtColor(shot, cv2.COLOR_BGRA2BGR)
+def crop_client_field(client_bgr, margins):
+    """Crop configured field margins from a client-area screenshot."""
+    height, width = client_bgr.shape[:2]
+    ml = int(margins.get("margin_left", 0))
+    mt = int(margins.get("margin_top", 0))
+    mr = int(margins.get("margin_right", 0))
+    mb = int(margins.get("margin_bottom", 0))
+    field_width = width - ml - mr
+    field_height = height - mt - mb
+    if field_width < 1 or field_height < 1:
+        raise ValueError(
+            f"Invalid capture region: client {width}x{height}, margins L{ml} T{mt} R{mr} B{mb}"
+        )
+    return client_bgr[mt : mt + field_height, ml : ml + field_width].copy()
 
 
 def encode_png_data_url(bgr):
@@ -83,13 +114,17 @@ def encode_png_data_url(bgr):
 
 def capture_game_field(
     window_title=DEFAULT_GAME_WINDOW_NAME,
-    target_x=DEFAULT_WINDOW_POSITION[0],
-    target_y=DEFAULT_WINDOW_POSITION[1],
+    target_x=None,
+    target_y=None,
     margins=None,
-    settle_sec=SETTLE_SEC,
+    settle_sec=None,
 ):
     """
-    Focus Graphwar, move to the corner, grab the configured field region.
+    Capture the configured Graphwar field without changing the user's desktop.
+
+    ``target_x``, ``target_y``, and ``settle_sec`` are retained as ignored
+    compatibility arguments for callers from older versions.  The capture is
+    rendered directly from the Graphwar window, not from desktop pixels.
 
     Returns:
         dict with keys ok, image (data URL), width, height, field — or ok=False, error.
@@ -98,21 +133,14 @@ def capture_game_field(
     if hwnd is None:
         return {"ok": False, "error": f"Window «{window_title}» not found"}
 
-    focus_game_window(hwnd)
-    if settle_sec > 0:
-        time.sleep(settle_sec)
-
-    move_game_window(hwnd, target_x, target_y)
-    if settle_sec > 0:
-        time.sleep(settle_sec)
-
     margins = margins or load_capture_margins()
     try:
         field = get_capture_field(hwnd, margins)
+        bgr = crop_client_field(grab_client_bgr(hwnd), margins)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-
-    bgr = grab_field_bgr(field)
+    except Exception as exc:
+        return {"ok": False, "error": f"Could not capture Graphwar quietly: {exc}"}
     try:
         image = encode_png_data_url(bgr)
     except RuntimeError as exc:

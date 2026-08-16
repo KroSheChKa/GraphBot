@@ -12,6 +12,11 @@ const ACTIVE_ANCHOR_WEIGHT = 10;
 const CLICK_LEFT_TOLERANCE = 0.08;
 const VERTICAL_MAX_COEFF = 999;
 const VERTICAL_MIN_EPS = 0.001;
+const SIGMOID_K_MAX = 800;
+const SIGMOID_K_VALUES = [
+  ...Array.from({ length: 30 }, (_unused, index) => index + 1),
+  40, 50, 60, 80, 100, 150, 200, 250, 300, SIGMOID_K_MAX,
+];
 
 const CANVAS_WIDTH = 1000;
 const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
@@ -27,8 +32,8 @@ const DEFAULT_PARAMS = {
   taylorOrder: 8,
   taylorHiddenLayers: 2,
   taylorHiddenSize: 16,
-  fourierHarmonics: 8,
-  fourierHiddenLayers: 2,
+  fourierHarmonics: 12,
+  fourierHiddenLayers: 0,
   fourierHiddenSize: 16,
   splineBoundary: "natural",
   splineUseBSpline: false,
@@ -44,7 +49,7 @@ const DEFAULT_PARAMS = {
   freezeX0: true,
   dotPopulation: 48,
   dotControlPoints: 12,
-  dotTrajectory: "linear",
+  dotTrajectory: "spline",
   dotSplineSamples: 16,
   dotTargetRadius: 0.15,
   dotMutationScale: 0.9,
@@ -194,6 +199,41 @@ function setup() {
   document.getElementById("canvas-container").appendChild(cnv.elt);
   controlsEl = document.getElementById("controls-panel");
   buildControlsPanel();
+  controlsEl.addEventListener("click", onHelpTriggerClick);
+  controlsEl.addEventListener("keydown", onHelpTriggerKeydown);
+  document.addEventListener("click", closeHelpPopups);
+}
+
+function setHelpPopupOpen(trigger, open) {
+  if (!trigger) return;
+  trigger.classList.toggle("is-open", open);
+  trigger.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function closeHelpPopups() {
+  document.querySelectorAll(".help-trigger.is-open").forEach((trigger) => {
+    setHelpPopupOpen(trigger, false);
+  });
+}
+
+function onHelpTriggerClick(event) {
+  const trigger = event.target.closest(".help-trigger");
+  if (!trigger || !controlsEl.contains(trigger)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const shouldOpen = !trigger.classList.contains("is-open");
+  closeHelpPopups();
+  setHelpPopupOpen(trigger, shouldOpen);
+}
+
+function onHelpTriggerKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const trigger = event.target.closest(".help-trigger");
+  if (!trigger || !controlsEl.contains(trigger)) return;
+  event.preventDefault();
+  const shouldOpen = !trigger.classList.contains("is-open");
+  closeHelpPopups();
+  setHelpPopupOpen(trigger, shouldOpen);
 }
 
 function draw() {
@@ -230,13 +270,12 @@ const MLP_ACTIVATION_OPTIONS = [
 ];
 
 function controlActivationSelect() {
-  const disabled = mlpHiddenLayerCount() <= 0;
+  if (mlpHiddenLayerCount() <= 0) return "";
   return controlSelect(
     "mlpActivation",
     "Hidden-layer activation",
     MLP_ACTIVATION_OPTIONS,
-    params.mlpActivation ?? "tanh",
-    { disabled, title: disabled ? "Requires at least one hidden layer" : "" }
+    params.mlpActivation ?? "tanh"
   );
 }
 
@@ -244,6 +283,34 @@ function mlpHiddenLayerCount() {
   if (params.approxMethod === "taylor") return params.taylorHiddenLayers;
   if (params.approxMethod === "fourier") return params.fourierHiddenLayers;
   return 0;
+}
+
+function actionButton(id, label, { disabled = false, secondary = false } = {}) {
+  const disabledAttr = disabled ? " disabled" : "";
+  const secondaryClass = secondary ? " secondary" : "";
+  const disabledClass = disabled ? " is-disabled" : "";
+  return `
+    <span class="action-control${disabledClass}">
+      <button id="${id}" type="button" class="${secondaryClass.trim()}"${disabledAttr}>${label}</button>
+      <span class="disabled-reason" role="tooltip"></span>
+    </span>
+  `;
+}
+
+function setActionDisabled(button, disabled, reason = "") {
+  if (!button) return;
+  button.disabled = disabled;
+  const control = button.closest(".action-control");
+  if (!control) return;
+  control.classList.toggle("is-disabled", disabled);
+  const tooltip = control.querySelector(".disabled-reason");
+  if (tooltip) tooltip.textContent = disabled ? reason : "";
+}
+
+function copyUnavailableReason() {
+  if (params.inputMode === "click") return "Place an active soldier and at least one target first.";
+  if (params.inputMode === "dot") return "Place an active soldier and target, then start Trajectory Search.";
+  return "Draw a curve first to create a formula.";
 }
 
 function buildControlsPanel() {
@@ -255,46 +322,41 @@ function buildControlsPanel() {
 
   if (params.inputMode === "draw") {
     if (params.approxMethod === "linear") {
-      drawMethodControls = `
-        <p class="note">Straight lines between blue dataset points. Segment count follows the dataset step.</p>
-      `;
+      drawMethodControls = "";
     } else if (params.approxMethod === "sigmoid") {
       drawMethodControls = `
-      ${controlSlider("sigmoidK", "k (sigmoid steepness σ)", 1, 300, 1, params.sigmoidK, 0)}
+      ${controlSigmoidSteepness(params.sigmoidK)}
       ${controlSlider("numNeurons", "Neurons (= steps)", 5, 150, 1, params.numNeurons, 0)}
       ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.01, 0.2, 0.01, params.trainLr, 2)}
-      ${controlCheckbox("stepHeights", "Initialize w from line", params.stepHeights)}
-      ${controlCheckbox("freezeX0", "Freeze x₀ (uniform spacing)", params.freezeX0)}
+      ${controlCheckbox("stepHeights", "Initialize w from line", params.stepHeights, "Initializes each sigmoid weight from the target line's estimated height jump at that step. This gives training a useful starting shape.")}
+      ${controlCheckbox("freezeX0", "Freeze x₀ (uniform spacing)", params.freezeX0, "Keeps sigmoid centers x₀ evenly spaced instead of training their positions. This makes the model more stable and easier to interpret.")}
       ${controlCheckbox("showNeurons", "Show x₀ lines", params.showNeurons)}
       <button id="btn-retrain" type="button">Retrain</button>
-      <p class="note">Uniform x₀ along x. w[i] = height jump of the line at x₀[i]. k controls step sharpness.</p>
     `;
     } else if (params.approxMethod === "taylor") {
       drawMethodControls = `
       ${controlSlider("taylorOrder", "Order n (φ input)", 1, 20, 1, params.taylorOrder, 0)}
       ${controlSlider("taylorHiddenLayers", "Hidden layers", 0, 4, 1, params.taylorHiddenLayers, 0)}
-      ${controlSlider("taylorHiddenSize", "Neurons per layer", 2, 64, 1, params.taylorHiddenSize, 0)}
+      ${params.taylorHiddenLayers > 0 ? controlSlider("taylorHiddenSize", "Neurons per layer", 2, 64, 1, params.taylorHiddenSize, 0) : ""}
       ${controlActivationSelect()}
       ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Retrain</button>
-      <p class="note">φ(t)=[1,t,…,tⁿ], t=(x−c)/s → MLP → y. 0 hidden layers = pure polynomial; &gt;0 = nonlinear activation between φ and y.</p>
     `;
     } else if (params.approxMethod === "fourier") {
       drawMethodControls = `
       ${controlSlider("fourierHarmonics", "Harmonics K", 1, 40, 1, params.fourierHarmonics, 0)}
       ${controlSlider("fourierHiddenLayers", "Hidden layers", 0, 4, 1, params.fourierHiddenLayers, 0)}
-      ${controlSlider("fourierHiddenSize", "Neurons per layer", 2, 64, 1, params.fourierHiddenSize, 0)}
+      ${params.fourierHiddenLayers > 0 ? controlSlider("fourierHiddenSize", "Neurons per layer", 2, 64, 1, params.fourierHiddenSize, 0) : ""}
       ${controlActivationSelect()}
       ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Retrain</button>
-      <p class="note">φ(t)=[1,cos(kπt),sin(kπt),…], π=3.1416, t=(x−c)/s → MLP → y. 0 layers = Fourier series.</p>
     `;
     } else if (params.approxMethod === "spline") {
       drawMethodControls = `
-      ${controlCheckbox("splineUseBSpline", "Use B-spline basis", params.splineUseBSpline)}
+      ${controlCheckbox("splineUseBSpline", "Use B-spline basis", params.splineUseBSpline, "Fits a cubic B-spline with adjustable control-point count and smoothing instead of interpolating every sampled point with the regular cubic spline.")}
       ${!params.splineUseBSpline ? controlSelect(
         "splineBoundary",
         "Boundary condition",
@@ -308,7 +370,6 @@ function buildControlsPanel() {
       ${params.splineUseBSpline ? controlSlider("bsplineSmoothing", "B-spline smoothing λ", 0, 1, 0.01, params.bsplineSmoothing, 2) : ""}
       ${controlSlider("splinePlotStep", "Curve precision (plot step)", 0.05, 0.5, 0.05, params.splinePlotStep, 2)}
       ${controlSlider("splineFormulaPrecision", "Formula decimals (stable export)", 8, 14, 1, params.splineFormulaPrecision, 0)}
-      <p class="note">Cubic spline is C²-smooth. Natural mode interpolates every blue point. B-spline adds adjustable control-point density and smoothing; smaller plot step gives a more detailed preview. Export uses high precision because small coefficient errors accumulate along the spline basis.</p>
     `;
     }
   }
@@ -316,13 +377,11 @@ function buildControlsPanel() {
   let modeSpecificControls = "";
   if (params.inputMode === "click") {
     modeSpecificControls = `
-    <p class="note">1st click — <strong>active soldier</strong> (purple <strong>A</strong>). Then place targets in click order. Click <strong>left</strong> of the previous point → vertical segment. Formula has no <code>y=</code> prefix. <strong>Ctrl+Z</strong> / right-click / Backspace — undo last point.</p>
     <button id="btn-undo-click" type="button" class="secondary">Undo last click</button>
   `;
   } else if (params.inputMode === "dot") {
     modeSpecificControls = `
     <div class="dot-mode-section">
-      <p class="note">1st click — active soldier. Other clicks are unordered enemy targets. Evolution always moves right; targets left of A are marked unreachable.</p>
       ${controlSlider("dotPopulation", "Population", 12, 120, 1, params.dotPopulation, 0)}
       ${controlSlider("dotControlPoints", "Control points", 4, 24, 1, params.dotControlPoints, 0)}
       ${controlSelect(
@@ -342,10 +401,10 @@ function buildControlsPanel() {
       ${controlCheckbox("dotAvoidForbidden", "Avoid detected black zones", params.dotAvoidForbidden)}
       ${controlCheckbox("dotShowForbidden", "Show forbidden-mask overlay", params.dotShowForbidden)}
       <div class="dot-actions">
-        <button id="btn-dot-start" type="button">Start evolution</button>
-        <button id="btn-dot-stop" type="button" class="secondary">Stop</button>
-        <button id="btn-dot-undo" type="button" class="secondary">Undo point</button>
-        <button id="btn-dot-clear" type="button" class="secondary">Clear points</button>
+        ${actionButton("btn-dot-start", "Start evolution")}
+        ${actionButton("btn-dot-stop", "Stop", { secondary: true })}
+        ${actionButton("btn-dot-undo", "Undo point", { secondary: true })}
+        ${actionButton("btn-dot-clear", "Clear points", { secondary: true })}
       </div>
     </div>
   `;
@@ -354,8 +413,7 @@ function buildControlsPanel() {
     <div class="draw-mode-section">
       ${controlDrawMethodPicker()}
       ${controlSlider("sampleStep", "Dataset step", 0.1, 2, 0.05, params.sampleStep, 2)}
-      ${controlCheckbox("drawForwardOnly", "Prevent backward drawing (x only increases)", params.drawForwardOnly)}
-      <p class="note">When enabled, dragging left locks the stroke at the furthest x already reached; vertical movement is still allowed.</p>
+      ${controlCheckbox("drawForwardOnly", "Prevent backward drawing (x only increases)", params.drawForwardOnly, "Dragging left keeps the furthest x already reached, while vertical movement remains available.")}
       ${drawMethodControls}
     </div>
   `;
@@ -391,14 +449,13 @@ function buildControlsPanel() {
   }
 
   controlsEl.innerHTML = `
+    ${actionButton("btn-copy-formula", "Copy y", { disabled: true })}
     <h2>Parameters</h2>
-    <button id="btn-capture-field" type="button">Capture field</button>
-    ${controlCheckbox("autoDetectActive", "Auto-detect active player", params.autoDetectActive)}
-    <p class="note">If disabled, click the active player manually as point A. Auto mode uses the player's image/body plus a circular active-marker match, not the name color.</p>
+    ${actionButton("btn-capture-field", "Capture field")}
+    ${controlCheckbox("autoDetectActive", "Auto-detect active player", params.autoDetectActive, "Finds the player's yellow body and circular active marker after capture. Disable it to place the purple A marker manually.")}
     ${controlInputModePicker()}
     ${modeSpecificControls}
-    <button id="btn-copy-formula" type="button" disabled>Copy y</button>
-    <button id="btn-reset" type="button" class="secondary">Reset</button>
+    ${actionButton("btn-reset", "Reset all", { secondary: true })}
     <p id="status-mse" class="status">—</p>
     ${legendHtml}
   `;
@@ -459,7 +516,7 @@ function buildControlsPanel() {
 function controlInputModePicker() {
   return `
     <div class="control mode-picker">
-      <div class="control-head"><span>Mode</span></div>
+      ${controlHeader("Mode", modeHelpText(params.inputMode))}
       <div class="mode-options">
         <label class="mode-option">
           <input type="radio" name="inputMode" data-param="inputMode" value="click" ${params.inputMode === "click" ? "checked" : ""} />
@@ -471,20 +528,59 @@ function controlInputModePicker() {
         </label>
         <label class="mode-option">
           <input type="radio" name="inputMode" data-param="inputMode" value="dot" ${params.inputMode === "dot" ? "checked" : ""} />
-          <span>3. Dot mode</span>
+          <span>3. Trajectory Search</span>
         </label>
       </div>
     </div>
   `;
 }
 
-function controlSlider(key, label, min, max, step, value, decimals) {
+function escapeControlText(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function controlHelp(text) {
+  if (!text) return "";
+  const safeText = escapeControlText(text);
+  return `<span class="help-trigger" tabindex="0" role="button" aria-expanded="false" aria-label="Help: ${safeText}">?<span class="help-popup" role="tooltip">${safeText}</span></span>`;
+}
+
+function controlLabel(label) {
+  return `<span class="control-label">${label}</span>`;
+}
+
+function controlHeader(label, helpText = "", valueHtml = "") {
+  return `
+    <div class="control-head">
+      ${controlLabel(label)}
+      <span class="control-head-end">${valueHtml}${controlHelp(helpText)}</span>
+    </div>
+  `;
+}
+
+function drawMethodHelpText(method) {
+  if (method === "linear") return "Connects sampled blue points with straight segments. Dataset step controls how many segments are created.";
+  if (method === "sigmoid") return "Uses uniformly spaced sigmoid steps. Learned step heights build the curve, while k controls each step's sharpness.";
+  if (method === "taylor") return "Builds powers of normalized x: φ(t)=[1,t,…,tⁿ]. Zero hidden layers gives a polynomial; more layers add an MLP.";
+  if (method === "fourier") return "Builds sine/cosine features of normalized x. Zero hidden layers gives a Fourier series; more layers add an MLP.";
+  if (method === "spline") return "Cubic spline is C²-smooth. B-spline adds adjustable control-point density and smoothing. High export precision protects the piecewise basis.";
+  return "";
+}
+
+function modeHelpText(mode) {
+  if (mode === "click") return "First click is the active soldier; later clicks are ordered targets. Click left of the previous point for a near-vertical segment. Copy y has no y= prefix.";
+  if (mode === "dot") return "First click is the active soldier; later clicks are unordered targets. The current solver evolves right-moving trajectories, so targets left of A are unreachable.";
+  return "Draw a target curve, choose an approximation method, and copy its fitted formula.";
+}
+
+function controlSlider(key, label, min, max, step, value, decimals, helpText = "") {
   return `
     <label class="control">
-      <div class="control-head">
-        <span>${label}</span>
-        <span class="control-value" data-value-for="${key}">${formatParam(key, value, decimals)}</span>
-      </div>
+      ${controlHeader(label, helpText, `<span class="control-value" data-value-for="${key}">${formatParam(key, value, decimals)}</span>`)}
       <input
         type="range"
         data-param="${key}"
@@ -498,16 +594,57 @@ function controlSlider(key, label, min, max, step, value, decimals) {
   `;
 }
 
-function controlCheckbox(key, label, checked) {
+function sigmoidKIndex(value) {
+  const requested = Number(value);
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+  for (let index = 0; index < SIGMOID_K_VALUES.length; index++) {
+    const distance = Math.abs(SIGMOID_K_VALUES[index] - requested);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  }
+  return nearestIndex;
+}
+
+function formatSigmoidK(value) {
+  const numeric = Number(value);
+  return numeric === SIGMOID_K_MAX ? `Max (${SIGMOID_K_MAX.toLocaleString()})` : String(numeric);
+}
+
+function controlSigmoidSteepness(value) {
+  const index = sigmoidKIndex(value);
+  const normalizedValue = SIGMOID_K_VALUES[index];
   return `
-    <label class="control checkbox">
-      <input type="checkbox" data-param="${key}" ${checked ? "checked" : ""} />
-      <span>${label}</span>
+    <label class="control">
+      ${controlHeader("k (sigmoid steepness σ)", "Controls how abruptly each sigmoid step changes. Values 1–30 are precise; larger choices make sharper, more line-like transitions.", `<span class="control-value" data-value-for="sigmoidK">${formatSigmoidK(normalizedValue)}</span>`)}
+      <input
+        type="range"
+        data-param="sigmoidK"
+        data-scale="sigmoid-k"
+        data-decimals="0"
+        min="0"
+        max="${SIGMOID_K_VALUES.length - 1}"
+        step="1"
+        value="${index}"
+        aria-valuetext="${formatSigmoidK(normalizedValue)}"
+      />
     </label>
   `;
 }
 
-function controlSelect(key, label, options, value, { disabled = false, title = "" } = {}) {
+function controlCheckbox(key, label, checked, helpText = "") {
+  return `
+    <label class="control checkbox">
+      <input type="checkbox" data-param="${key}" ${checked ? "checked" : ""} />
+      ${controlLabel(label)}
+      ${controlHelp(helpText)}
+    </label>
+  `;
+}
+
+function controlSelect(key, label, options, value, { disabled = false, title = "", helpText = "" } = {}) {
   const opts = options
     .map(
       (opt) =>
@@ -518,7 +655,7 @@ function controlSelect(key, label, options, value, { disabled = false, title = "
   const titleAttr = title ? ` title="${title}"` : "";
   return `
     <label class="control">
-      <div class="control-head"><span>${label}</span></div>
+      ${controlHeader(label, helpText)}
       <select data-param="${key}"${disabledAttr}${titleAttr}>${opts}</select>
     </label>
   `;
@@ -527,7 +664,7 @@ function controlSelect(key, label, options, value, { disabled = false, title = "
 function controlDrawMethodPicker() {
   return `
     <div class="control method-picker nested">
-      <div class="control-head"><span>Approximation method</span></div>
+      ${controlHeader("Approximation method", drawMethodHelpText(params.approxMethod))}
       <div class="method-options">
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="linear" ${params.approxMethod === "linear" ? "checked" : ""} />
@@ -539,7 +676,7 @@ function controlDrawMethodPicker() {
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="taylor" ${params.approxMethod === "taylor" ? "checked" : ""} />
-          <span>2.3 Taylor (polynomial) (beta)</span>
+          <span>2.3 Taylor (polynomial)</span>
         </label>
         <label class="method-option">
           <input type="radio" name="approxMethod" data-param="approxMethod" value="fourier" ${params.approxMethod === "fourier" ? "checked" : ""} />
@@ -582,7 +719,11 @@ function syncSliderLabels() {
     const key = input.dataset.param;
     const decimals = parseInt(input.dataset.decimals || "2", 10);
     const label = controlsEl.querySelector(`[data-value-for="${key}"]`);
-    if (label) label.textContent = formatParam(key, parseFloat(input.value), decimals);
+    const value = readParamFromInput(input);
+    if (label) label.textContent = key === "sigmoidK" ? formatSigmoidK(value) : formatParam(key, value, decimals);
+    if (key === "sigmoidK" && input.dataset.scale === "sigmoid-k") {
+      input.setAttribute("aria-valuetext", formatSigmoidK(value));
+    }
   });
 }
 
@@ -590,6 +731,10 @@ function readParamFromInput(input) {
   if (input.type === "checkbox") return input.checked;
   if (input.type === "radio") return input.value;
   if (input.tagName === "SELECT") return input.value;
+  if (input.dataset.scale === "sigmoid-k") {
+    const index = Math.max(0, Math.min(SIGMOID_K_VALUES.length - 1, Math.round(Number(input.value))));
+    return SIGMOID_K_VALUES[index];
+  }
   return parseFloat(input.value);
 }
 
@@ -606,7 +751,11 @@ function onParamInput(event) {
   const key = input.dataset.param;
   const decimals = parseInt(input.dataset.decimals || "2", 10);
   const label = controlsEl.querySelector(`[data-value-for="${key}"]`);
-  if (label) label.textContent = formatParam(key, parseFloat(input.value), decimals);
+  const value = readParamFromInput(input);
+  if (label) label.textContent = key === "sigmoidK" ? formatSigmoidK(value) : formatParam(key, value, decimals);
+  if (key === "sigmoidK" && input.dataset.scale === "sigmoid-k") {
+    input.setAttribute("aria-valuetext", formatSigmoidK(value));
+  }
 }
 
 function onMlpActivationChange(event) {
@@ -689,6 +838,11 @@ function onParamChange(event) {
     updateStatusPanel();
     updateCopyButton();
     logActiveFormula();
+    return;
+  }
+  if (changedKey === "taylorHiddenLayers" || changedKey === "fourierHiddenLayers") {
+    buildControlsPanel();
+    if (drawnPoints.length > 0 && newValue !== prevValue) rerunPipeline();
     return;
   }
   if (drawnPoints.length > 0 && newValue !== prevValue) {
@@ -959,12 +1113,20 @@ function updateDotButtons() {
   const undoBtn = document.getElementById("btn-dot-undo");
   const clearBtn = document.getElementById("btn-dot-clear");
   if (startBtn) {
-    startBtn.disabled = dotPoints.length < 2;
+    setActionDisabled(
+      startBtn,
+      dotPoints.length < 2,
+      "Place an active soldier and at least one target before starting evolution."
+    );
     startBtn.textContent = dotEvolution ? "Restart evolution" : "Start evolution";
   }
-  if (stopBtn) stopBtn.disabled = !dotRunning;
-  if (undoBtn) undoBtn.disabled = dotPoints.length <= (activeAnchor ? 1 : 0);
-  if (clearBtn) clearBtn.disabled = dotPoints.length === 0;
+  setActionDisabled(stopBtn, !dotRunning, "Evolution is not running.");
+  setActionDisabled(
+    undoBtn,
+    dotPoints.length <= (activeAnchor ? 1 : 0),
+    "There is no manually placed point to undo."
+  );
+  setActionDisabled(clearBtn, dotPoints.length === 0, "There are no points to clear.");
 }
 
 function addDotPointAtMouse() {
@@ -1708,7 +1870,7 @@ function logActiveFormula() {
     params.inputMode === "click"
       ? "click mode"
       : params.inputMode === "dot"
-        ? "dot mode"
+        ? "trajectory search"
         : methodLabel();
   const mse =
     params.inputMode === "click" ||
@@ -1746,12 +1908,16 @@ async function copyActiveFormula() {
 
 function updateCopyButton() {
   if (!copyBtnEl) return;
-  copyBtnEl.disabled = getActiveFormulaText() === null;
+  setActionDisabled(
+    copyBtnEl,
+    getActiveFormulaText() === null,
+    copyUnavailableReason()
+  );
 }
 
 function updateCaptureButton() {
   if (!captureBtnEl) return;
-  captureBtnEl.disabled = isCapturing;
+  setActionDisabled(captureBtnEl, isCapturing, "Graphwar field capture is already in progress.");
   captureBtnEl.textContent = isCapturing ? "Capturing..." : "Capture field";
 }
 

@@ -1,192 +1,69 @@
-# GraphBot — TODO
+# GraphBot roadmap
 
-Development plan. Tackle one item at a time, not everything at once.
+GraphBot's primary product is the local browser UI: **Click Mode** and **Draw Mode** are the normal workflows; **Trajectory Search** is an experimental evolutionary solver. This roadmap intentionally contains only future work. Completed milestones belong in Git history and the documentation, not here.
 
----
+## Near-term product polish
 
-## 1. Teammate avoidance (auto mode)
+- [ ] Produce the planned README showcase assets: hero workflow, one-drawing/multiple-answers comparison, MLP-training animation, and Trajectory Search evolution.
+- [ ] Capture a small set of polished, reproducible UI examples for Click Mode, Draw Mode, and Trajectory Search.
+- [ ] Keep the UI as the only public entry point; audit any new documentation or scripts so they do not reintroduce GraphBot.py as the default workflow.
+- [ ] Decide whether the legacy research program should remain at the repository root, move to a clearly marked legacy area, or gain a reproducible research harness. Preserve its unique A*, polynomial, and symbolic-GA experiments before any relocation.
 
-**Status:** not started
+## Automatic trajectory search
 
-**Current:** in `separate()`, the left half of the field (`x < width/2`) is treated as allies (`good`), the right as enemies (`bad`). Teammates do not appear in the auto formula but are not filtered explicitly either.
+Trajectory Search already has an increasing-x genome, configurable hit radius, straight/cubic-spline paths, bounds checks, a forbidden-mask penalty, and lexicographic ranking. The next work starts beyond that baseline.
 
-**Needed:**
-- [ ] Explicitly separate the active player from teammates (not just left/right split).
-- [ ] Do not route segments through or toward teammates.
-- [ ] Decide how to tell a teammate from an enemy (color, position, size, team).
+- [ ] Detect enemy targets from a captured field, so manual target placement becomes optional.
+- [ ] Distinguish the active player, teammates, and enemies without relying on left/right screen position alone.
+- [ ] Estimate usable enemy hit radii from the image and feed them into trajectory scoring.
+- [ ] Improve obstacle clearance from a collision penalty into configurable distance-aware routing.
+- [ ] Compare several trajectory representations: control-point polylines, splines, and other compact genomes.
+- [ ] Add alternative solvers beside the current evolutionary search, then compare planners on the same scene.
+- [ ] Support objective trade-offs such as hit count, formula length, safety margin, and target ordering without hiding them behind one opaque score.
+- [ ] Build reproducible search scenarios and regression tests for target hits, bounds, and forbidden-mask behavior.
 
----
+## Approximation laboratory
 
-## 2. Enemy as a circle, not a point (auto mode)
+Current Draw Mode includes linear segments, sigmoid networks, Taylor/polynomial features with optional MLPs, Fourier features with optional MLPs, cubic splines, B-splines, and eight hidden-layer activations.
 
-**Status:** not started
+- [ ] Add a benchmark view: one stroke → every implemented approximator → MSE, maximum error, formula length, and training time.
+- [ ] Add hard target/anchor constraints for neural approximators where a curve must pass through designated points.
+- [ ] Visualize MLP training over epochs in the UI or a deterministic showcase export.
+- [ ] Explore trainable Fourier frequencies and phases.
+- [ ] Explore radial-basis networks with Gaussian and Cauchy-style kernels.
+- [ ] Explore SIREN-style sine networks.
+- [ ] Evaluate wavelet, rational-network, and small KAN-like representations as research experiments.
+- [ ] Keep formula complexity as a first-class constraint: a low-error model is not automatically a usable Graphwar expression.
 
-**Current:** `direct_line()` aims at the circle **center**. Enemy radius (`i[2]` from Hough) is unused.
+## Text and raster experiments
 
-**Important:** a hit counts anywhere on the enemy **circle**. If radius is off by even a pixel, the trajectory may miss. Need an **accurate** radius estimate, not just the center.
+A future research mode could turn rasterized shapes into high-frequency mathematical paths. It should begin as a standalone experiment, not silently complicate the normal Draw Mode workflow.
 
-**Idea:** when enemies are close in X, one segment can take several — the line passes through their circles along the way and the formula stays shorter.
+- [ ] Rasterize arbitrary text from system fonts, including Unicode, into a black/white mask.
+- [ ] Scan masks with configurable vertical density and multiple passes through dark regions.
+- [ ] Represent white gaps with near-vertical transitions while preserving a valid one-valued trajectory where possible.
+- [ ] Prototype several generators: piecewise linear/spline, sine, sigmoid pairs, sigmoid(sin()) or square-like periodic waves, and Fourier-based paths.
+- [ ] Measure export size, numerical stability, and game behavior for very high-frequency formulas.
+- [ ] Generalize from text to arbitrary raster images only after the text pipeline is robust.
 
-**Needed:**
-- [ ] Measure each enemy radius accurately (Hough + validation/refinement).
-- [ ] Build trajectories using radius, not center only.
-- [ ] When enemies are close in X, check whether one segment can clip multiple targets.
-- [ ] Optimize target order/set for the shortest formula.
+## Computer vision and tooling
 
----
+The project already has quiet client-window capture, saved clean field crops, player/active-player calibration, obstacle calibration, and a forbidden-mask configurator.
 
-## 3. Automatic obstacle avoidance (black circles, auto mode)
+- [ ] Build a unified calibration UI that consolidates the separate capture, player, active-marker, obstacle, and forbidden-mask tools.
+- [ ] Curate saved field captures into a labeled regression dataset.
+- [ ] Add detector regression tests against accumulated captures, including active-player position and forbidden-mask quality.
+- [ ] Improve player removal from the forbidden mask so sprites and graph strokes are less likely to block valid routes.
+- [ ] Derive or validate field bounds dynamically across window sizes, DPI configurations, and Graphwar layouts.
+- [ ] Add explicit diagnostics when quiet window capture is unsupported by a particular game/window state.
 
-**Status:** not started (partial groundwork)
+## Research playground
 
-**Current:**
-- `detect_black_circles()` exists but is **commented out** in `main()` (mode 0).
-- Prototype A* lives in `Visuals in p5.js/astar-pathfinding/` — **not wired** to Python. **Leave p5.js alone for now** — reference only.
+These are useful directions, not promises of product features.
 
-**Important:** hitting a black circle ends the round (effective “death”). Avoidance is mandatory in auto mode.
-
-**Needed:**
-- [ ] Enable black-circle detection in auto mode.
-- [ ] Avoidance algorithm (new or adapted from p5.js ideas) → waypoint chain → `direct_line()` segments.
-- [ ] Enforce “movement only to the right” (as in the game).
-
----
-
-## 4. Better active-player detection (auto mode)
-
-**Status:** ✅ implemented for capture and web UI
-
-**Current:** the red outline identifies the active-player candidate; the Hough player circle and red-ring geometry refine its center. The capture API returns confidence and measured uncertainty, and the web UI uses the result as a persistent anchor.
-
-**Game hint:** the active character has a **slight red outline**. Can be detected with a color mask / contour.
-
-**Needed:**
-- [x] Mask for the active player’s red outline (preferred approach).
-- [x] Fallback heuristics: size, position, difference from teammates/enemies.
-- [x] Tie into the calibration utility (#11) for threshold tuning.
-
-The anchor is retained through mode changes, `C`, and Undo; it changes only on a new capture or manual drag.
-
----
-
-## 5. Manual mode: click “to the left” = straight down
-
-**Status:** deferred (reverted to simple clicks + sort by X)
-
-**Current in GraphBot.py:** classic mode — clicks sorted by X, `direct_line` segments. Vertical segments are a separate task later.
-
----
-
-## 6. Graceful “no players found” handling
-
-**Status:** ✅ done
-
-**Implementation (`GraphBot.py`):**
-- `warn_no_players()` — clear message + calibration hints
-- Auto mode: `continue` instead of crash; separate branch when no enemies on the right
-- Click mode: `continue` when no players; no crash when there are no clicks either
-
----
-
-## 7. UX: fewer F-keys, don’t exit after formula
-
-**Status:** not started (discussion)
-
-**Current:**
-- F1 — start after mode selection.
-- F2 — quit.
-- F3/F4 — begin/end click collection.
-- Click mode calls `safe_exit(0)` after the formula — program exits.
-- Busy-wait on keys wastes CPU.
-
-**Desired behavior:**
-- Fewer required key presses.
-- After printing a formula the program **keeps running** (recalculate, new round).
-- No spinning `while not key: pass` loops.
-
-**Options (pick when implementing):**
-
-| Option | Auto mode | Manual mode |
-|--------|-----------|-------------|
-| **A. Right after mode pick** | Start without F1; formula refresh loop | Wait for clicks immediately |
-| **B. OpenCV window** | `cv2.waitKey()` instead of busy-wait; `q` quit, `r` refresh | Clicks + RMB or Enter = done |
-| **C. Single key** | Space = refresh now, Esc = quit | Space = build formula, Esc = quit |
-| **D. Focus-based auto** | When Graphwar is focused — refresh every N ms | — |
-
-**Recommendation:** option **B** — preview window already exists (`cv2.imshow`), natural place for controls; in manual mode **RMB or Enter** instead of F4; **Esc** instead of F2; drop F1/F3.
-
-**Needed:**
-- [ ] Agree on control scheme with the user.
-- [ ] Replace busy-wait with `waitKey` / timer.
-- [ ] Remove `safe_exit(0)` after manual mode — return to loop or wait for next command.
-- [ ] Console hints for active keys/actions.
-
----
-
-## 8. Hard-coded field and window constants
-
-**Status:** not started (low priority)
-
-**Current:** `field = {left: 14, top: 52, width: 772, height: 452}`, window `(-7, 0)`.
-
-**Context:** the game is always one resolution — usually fine. But `left`/`top` margins may differ slightly (Windows 10 vs 11, window frame).
-
-**Needed (optional):**
-- [ ] Read Graphwar window size via `GetWindowRect` and derive the field relative to it.
-- [ ] Or save margins once from the calibration utility (#11).
-
----
-
-## 9. Calibration utility (standalone program)
-
-**Status:** not started
-
-**Goal:** small tool to **tune detection coefficients** — adjust sliders/parameters and see results on a game screenshot immediately.
-
-**Show on preview:**
-- [ ] Detected enemies (circle + center + radius).
-- [ ] Active character (red outline / mask).
-- [ ] Teammates (if distinguishable).
-- [ ] Black obstacle circles.
-- [ ] Captured field bounds (`field`).
-
-**Tune:**
-- [ ] Grayscale thresholds for player mask (`lower_bound`, `upper_bound`, hole 169–171).
-- [ ] Hough parameters (`param1`, `param2`, `minRadius`, `maxRadius`, blur).
-- [ ] Black-circle thresholds.
-- [ ] Red-outline thresholds/color for active player.
-- [ ] Field margins `left`, `top`, `width`, `height`.
-
-**Format:** separate file, e.g. `calibrate.py` or `GraphBot_calibrate.py`. Save JSON config read by main `GraphBot.py`.
-
----
-
-## Known issues (reference)
-
-| # | Issue | Status |
-|---|-------|--------|
-| A | Crash when `detect_players() == None` | ✅ **#6** |
-| B | `separate()` — fragile good/bad/active logic | → **#1**, **#4** |
-| C | Hard-coded field constants | → **#8**, **#11** |
-| D | Windows only | by design |
-| E | Busy-wait F1/F3/F4 | → task **#7** |
-| F | A* in p5.js — prototype bugs | **do not touch** |
-
----
-
-- [ ] **#8 (partial):** Win32 field capture + `capture_config.json` — done
-- [ ] **#11 (partial):** `calibrate_active.py` — active player calibration via red glow
-
-1. ~~**#6**~~ — done
-2. **#11** — calibration (partial: preview + calibrate_active + calibrate_players)
-3. **#4** — active player via red outline (partial via calibrate_active)
-4. **#7** — UX without F-keys
-5. ~~**#5**~~ — vertical “down” in manual mode — done
-6. **#1** — teammates
-7. **#2** — enemy radius
-8. **#3** — black-circle avoidance
-9. **#8** — as needed
-
----
-
-*Last updated: 2025-06-14 (voice-review clarifications)*
+- [ ] Revisit the existing polynomial planner with reproducible scenes and formula-complexity metrics.
+- [ ] Revisit the existing symbolic genetic algorithm with safety, target, and expression-size constraints.
+- [ ] Investigate mixture-of-experts or hybrid planners that choose a representation per scene.
+- [ ] Evaluate alternative evolutionary algorithms and local optimization after the baseline search is benchmarked.
+- [ ] Create a small deterministic scenario suite for comparing all research planners.
+- [ ] Keep research dependencies and media-generation tools optional; do not add heavyweight packages to GraphBot's runtime requirements.
