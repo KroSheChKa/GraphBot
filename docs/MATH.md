@@ -85,7 +85,7 @@ The UI trains these networks in JavaScript with gradient descent. ReLU and Leaky
 Graphwar expressions work well with arithmetic and `abs`, so ReLU has the exact identity
 
 $$
-\operatorname{ReLU}(z)=\frac{z+|z|}{2}.
+\mathrm{ReLU}(z)=\frac{z+|z|}{2}.
 $$
 
 Leaky ReLU is exported by combining positive and negative absolute-value parts. Softplus, Swish, GELU, Mish, sigmoid, and `tanh` are emitted in their corresponding expression forms by the current UI exporter. Always inspect a copied formula if your Graphwar build has different parser support; [GAME_RULES.md](../GAME_RULES.md) is the project reference for the game syntax used here.

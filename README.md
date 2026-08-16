@@ -27,7 +27,7 @@ $$
 **Fourier features** — a harmonic vocabulary for waves and repeated shape.
 
 $$
-\operatorname{ReLU}(z)=\max(0,z)=\frac{z+|z|}{2}
+\mathrm{ReLU}(z)=\max(0,z)=\frac{z+|z|}{2}
 $$
 
 **Graphwar-safe export** — ReLU can be written with `abs`, rather than `max`.
@@ -81,6 +81,8 @@ s(x)=d\left(|x-x_1|-|x-x_2|\right)
 $$
 
 This makes a compact piecewise-linear building block that Graphwar can evaluate. Click Mode's exported expression intentionally has no `y=` prefix.
+
+https://github.com/user-attachments/assets/95afd94f-aecd-4682-b958-3359238795a6
 
 ## Draw Mode
 
