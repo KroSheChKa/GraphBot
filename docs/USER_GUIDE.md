@@ -58,6 +58,12 @@ For Taylor and Fourier, hidden layers set to zero produce a linear model on thei
 
 Enable **Prevent backward drawing** when your stroke should remain a function of $x$. The canvas will keep the greatest reached $x$ while still allowing vertical movement.
 
+### Private training animation video
+
+This control is intentionally hidden in the normal UI. Start the local server with `python tools/approximator_server.py --record-training` to enable it. Sigmoid, Taylor, and Fourier methods can then show their fit changing over time. After drawing a curve, set **Epochs per frame** and **Frame delay**, then select **Record training video**. The canvas plays a fresh training run, so each frame contains the approximation after the next group of epochs. Only the field canvas is recorded; controls and the rest of the desktop are excluded.
+
+When the run finishes, GraphBot uploads the browser-produced WebM to the local server. It is saved as `outputs/recordings/training-*.webm` (an ignored generated-artifact directory). Use a current Chrome, Edge, or Firefox build with canvas recording support. Linear and spline fits have no iterative training epochs, so the recording control is not shown for them.
+
 ## Trajectory Search
 
 Trajectory Search is the public name for the UI's evolutionary-search mode. It is an experimental solver.
@@ -70,6 +76,8 @@ Trajectory Search is the public name for the UI's evolutionary-search mode. It i
 6. Stop when satisfied, then use **Copy y**.
 
 The solver moves only to increasing $x$. It marks a target left of the active soldier as unreachable. Its collision grid comes from captured image pixels, so inspect the red forbidden-mask overlay before trusting an obstacle-sensitive route.
+
+When the server was started with `--record-training`, Trajectory Search also shows **Generations to record** and **Record generations**. It restarts the evolutionary run, records the specified number of generations of the canvas, then stops on the final champion and saves `outputs/recordings/trajectory-*.webm`. The blue population and the green best-ever champion are both included in the recording.
 
 ## Calibration
 

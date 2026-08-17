@@ -83,57 +83,54 @@ class SigmoidNetwork {
     this.sanitizeParams();
   }
 
-  train(data, xMin, xMax, epochs = 4000, lr = 0.08, freezeX0 = true) {
-    if (epochs <= 0 || data.length === 0) {
-      this.mse = this.computeMse(data);
-      return this.mse;
+  trainEpoch(data, xMin, xMax, lr = 0.08, freezeX0 = true) {
+    if (data.length === 0) return false;
+    const safeLr = Math.min(lr, 0.05);
+    const n = data.length;
+    let gradBias = 0;
+    const gradW = new Array(this.numNeurons).fill(0);
+    const gradX0 = new Array(this.numNeurons).fill(0);
+
+    for (const pt of data) {
+      const { y: pred, hidden } = this.forward(pt.x);
+      if (!Number.isFinite(pred)) {
+        this.sanitizeParams();
+        return false;
+      }
+
+      const err = pred - pt.y;
+      const grad = (2 / n) * err;
+
+      if (!Number.isFinite(grad)) continue;
+
+      gradBias += grad;
+
+      for (let i = 0; i < this.numNeurons; i++) {
+        const s = hidden[i];
+        gradW[i] += grad * s;
+        if (!freezeX0) {
+          const ds = s * (1 - s);
+          gradX0[i] += grad * this.w[i] * ds * (-this.k);
+        }
+      }
     }
 
-    const safeLr = Math.min(lr, 0.05);
+    this.bias -= safeLr * gradBias;
+    for (let i = 0; i < this.numNeurons; i++) {
+      this.w[i] -= safeLr * gradW[i];
+      if (!freezeX0) {
+        this.x0[i] -= safeLr * gradX0[i];
+        this.x0[i] = clamp(this.x0[i], xMin - 5, xMax + 5);
+      }
+    }
 
+    this.sanitizeParams();
+    return Number.isFinite(this.bias) && this.w.every((w) => Number.isFinite(w));
+  }
+
+  train(data, xMin, xMax, epochs = 4000, lr = 0.08, freezeX0 = true) {
     for (let epoch = 0; epoch < epochs; epoch++) {
-      const n = data.length;
-      let gradBias = 0;
-      const gradW = new Array(this.numNeurons).fill(0);
-      const gradX0 = new Array(this.numNeurons).fill(0);
-
-      for (const pt of data) {
-        const { y: pred, hidden } = this.forward(pt.x);
-        if (!Number.isFinite(pred)) {
-          this.sanitizeParams();
-          break;
-        }
-
-        const err = pred - pt.y;
-        const grad = (2 / n) * err;
-
-        if (!Number.isFinite(grad)) continue;
-
-        gradBias += grad;
-
-        for (let i = 0; i < this.numNeurons; i++) {
-          const s = hidden[i];
-          gradW[i] += grad * s;
-          if (!freezeX0) {
-            const ds = s * (1 - s);
-            gradX0[i] += grad * this.w[i] * ds * (-this.k);
-          }
-        }
-      }
-
-      this.bias -= safeLr * gradBias;
-      for (let i = 0; i < this.numNeurons; i++) {
-        this.w[i] -= safeLr * gradW[i];
-        if (!freezeX0) {
-          this.x0[i] -= safeLr * gradX0[i];
-          this.x0[i] = clamp(this.x0[i], xMin - 5, xMax + 5);
-        }
-      }
-
-      this.sanitizeParams();
-      if (!Number.isFinite(this.bias) || this.w.some((w) => !Number.isFinite(w))) {
-        break;
-      }
+      if (!this.trainEpoch(data, xMin, xMax, lr, freezeX0)) break;
     }
 
     this.mse = this.computeMse(data);
@@ -349,58 +346,51 @@ class FeatureMlpNetwork {
     }
   }
 
-  train(data, epochs = 4000, lr = 0.02) {
-    if (epochs <= 0 || data.length === 0 || this.layers.length === 0) {
-      this.mse = this.computeMse(data);
-      return this.mse;
-    }
-
+  trainEpoch(data, lr = 0.02) {
+    if (data.length === 0 || this.layers.length === 0) return false;
     const safeLr = Math.min(lr, 0.2);
     const gradW = this.layers.map((layer) => layer.W.map((row) => row.map(() => 0)));
     const gradB = this.layers.map((layer) => layer.b.map(() => 0));
 
-    for (let epoch = 0; epoch < epochs; epoch++) {
-      for (let l = 0; l < this.layers.length; l++) {
-        for (let o = 0; o < gradW[l].length; o++) {
-          gradW[l][o].fill(0);
-        }
-        gradB[l].fill(0);
-      }
+    let badStep = false;
+    const n = data.length;
 
-      let badStep = false;
-      const n = data.length;
-
-      for (const pt of data) {
-        const { y, activations, preActivations } = this.forward(pt.x);
-        if (!Number.isFinite(y)) {
-          badStep = true;
-          break;
-        }
-
-        const err = y - pt.y;
-        const gradOut = (2 / n) * err;
-        if (!Number.isFinite(gradOut)) continue;
-
-        this.accumulateGradients(gradOut, activations, preActivations, gradW, gradB);
-      }
-
-      if (badStep) {
-        this.sanitizeParams();
+    for (const pt of data) {
+      const { y, activations, preActivations } = this.forward(pt.x);
+      if (!Number.isFinite(y)) {
+        badStep = true;
         break;
       }
 
-      for (let l = 0; l < this.layers.length; l++) {
-        for (let o = 0; o < this.layers[l].W.length; o++) {
-          for (let i = 0; i < this.layers[l].W[o].length; i++) {
-            this.layers[l].W[o][i] -= safeLr * gradW[l][o][i];
-          }
-          this.layers[l].b[o] -= safeLr * gradB[l][o];
-        }
-      }
+      const err = y - pt.y;
+      const gradOut = (2 / n) * err;
+      if (!Number.isFinite(gradOut)) continue;
 
-      this.sanitizeParams();
+      this.accumulateGradients(gradOut, activations, preActivations, gradW, gradB);
     }
 
+    if (badStep) {
+      this.sanitizeParams();
+      return false;
+    }
+
+    for (let l = 0; l < this.layers.length; l++) {
+      for (let o = 0; o < this.layers[l].W.length; o++) {
+        for (let i = 0; i < this.layers[l].W[o].length; i++) {
+          this.layers[l].W[o][i] -= safeLr * gradW[l][o][i];
+        }
+        this.layers[l].b[o] -= safeLr * gradB[l][o];
+      }
+    }
+    this.sanitizeParams();
+    return true;
+
+  }
+
+  train(data, epochs = 4000, lr = 0.02) {
+    for (let epoch = 0; epoch < epochs; epoch++) {
+      if (!this.trainEpoch(data, lr)) break;
+    }
     this.mse = this.computeMse(data);
     return this.mse;
   }

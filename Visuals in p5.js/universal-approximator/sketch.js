@@ -44,6 +44,8 @@ const DEFAULT_PARAMS = {
   mlpActivation: "tanh",
   trainEpochs: 500,
   trainLr: 0.02,
+  animationEpochStep: 25,
+  animationFrameMs: 80,
   showNeurons: true,
   stepHeights: true,
   freezeX0: true,
@@ -55,6 +57,7 @@ const DEFAULT_PARAMS = {
   dotMutationScale: 0.9,
   dotEdgeOffset: 1.0,
   dotGenerationMs: 850,
+  trajectoryRecordGenerations: 20,
   dotAvoidForbidden: true,
   dotShowForbidden: true,
 };
@@ -104,8 +107,13 @@ let controlsEl;
 let statusMseEl;
 let copyBtnEl;
 let captureBtnEl;
+let recordTrainingBtnEl;
+let recordTrajectoryBtnEl;
+let trainingRecordingEnabled = false;
 let bgImage = null;
 let isCapturing = false;
+let isTrainingAnimation = false;
+let isTrajectoryRecording = false;
 let dotPoints = [];
 let dotEvolution = null;
 let dotRunning = false;
@@ -202,6 +210,18 @@ function setup() {
   controlsEl.addEventListener("click", onHelpTriggerClick);
   controlsEl.addEventListener("keydown", onHelpTriggerKeydown);
   document.addEventListener("click", closeHelpPopups);
+  loadServerOptions();
+}
+
+async function loadServerOptions() {
+  try {
+    const response = await fetch("/api/config");
+    const options = await response.json();
+    trainingRecordingEnabled = options.record_training_enabled === true;
+  } catch {
+    trainingRecordingEnabled = false;
+  }
+  buildControlsPanel();
 }
 
 function setHelpPopupOpen(trigger, open) {
@@ -313,6 +333,16 @@ function copyUnavailableReason() {
   return "Draw a curve first to create a formula.";
 }
 
+function trainingAnimationControls() {
+  if (!trainingRecordingEnabled) return "";
+  return `
+    ${controlSlider("animationEpochStep", "Epochs per frame", 1, 500, 1, params.animationEpochStep, 0, "How many training epochs are calculated before the next visible video frame.")}
+    ${controlSlider("animationFrameMs", "Frame delay (ms)", 20, 500, 10, params.animationFrameMs, 0, "A longer delay makes the changing approximation easier to watch and lengthens the video.")}
+    ${actionButton("btn-record-training", "Record training video", { secondary: true })}
+    <p class="note">Records only the field canvas. The WebM file is saved locally in <code>outputs/recordings</code>.</p>
+  `;
+}
+
 function buildControlsPanel() {
   params.splineFormulaPrecision = Math.max(
     8,
@@ -333,6 +363,7 @@ function buildControlsPanel() {
       ${controlCheckbox("freezeX0", "Freeze x₀ (uniform spacing)", params.freezeX0, "Keeps sigmoid centers x₀ evenly spaced instead of training their positions. This makes the model more stable and easier to interpret.")}
       ${controlCheckbox("showNeurons", "Show x₀ lines", params.showNeurons)}
       <button id="btn-retrain" type="button">Retrain</button>
+      ${trainingAnimationControls()}
     `;
     } else if (params.approxMethod === "taylor") {
       drawMethodControls = `
@@ -343,6 +374,7 @@ function buildControlsPanel() {
       ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Retrain</button>
+      ${trainingAnimationControls()}
     `;
     } else if (params.approxMethod === "fourier") {
       drawMethodControls = `
@@ -353,6 +385,7 @@ function buildControlsPanel() {
       ${controlSlider("trainEpochs", "Epochs", 500, 10000, 100, params.trainEpochs, 0)}
       ${controlSlider("trainLr", "Learning rate", 0.001, 0.2, 0.001, params.trainLr, 3)}
       <button id="btn-retrain" type="button">Retrain</button>
+      ${trainingAnimationControls()}
     `;
     } else if (params.approxMethod === "spline") {
       drawMethodControls = `
@@ -400,11 +433,13 @@ function buildControlsPanel() {
       ${controlSlider("dotGenerationMs", "Generation time (ms)", 250, 2000, 50, params.dotGenerationMs, 0)}
       ${controlCheckbox("dotAvoidForbidden", "Avoid detected black zones", params.dotAvoidForbidden)}
       ${controlCheckbox("dotShowForbidden", "Show forbidden-mask overlay", params.dotShowForbidden)}
+      ${trainingRecordingEnabled ? controlSlider("trajectoryRecordGenerations", "Generations to record", 2, 120, 1, params.trajectoryRecordGenerations, 0, "Restarts the search, records this many generations, then saves the field canvas as a WebM video.") : ""}
       <div class="dot-actions">
         ${actionButton("btn-dot-start", "Start evolution")}
         ${actionButton("btn-dot-stop", "Stop", { secondary: true })}
         ${actionButton("btn-dot-undo", "Undo point", { secondary: true })}
         ${actionButton("btn-dot-clear", "Clear points", { secondary: true })}
+        ${trainingRecordingEnabled ? actionButton("btn-record-trajectory", "Record generations", { secondary: true }) : ""}
       </div>
     </div>
   `;
@@ -504,11 +539,26 @@ function buildControlsPanel() {
     event.preventDefault();
     captureGameField();
   });
+  recordTrainingBtnEl = document.getElementById("btn-record-training");
+  if (recordTrainingBtnEl) {
+    recordTrainingBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      recordTrainingAnimation();
+    });
+  }
+  recordTrajectoryBtnEl = document.getElementById("btn-record-trajectory");
+  if (recordTrajectoryBtnEl) {
+    recordTrajectoryBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      recordTrajectorySearch();
+    });
+  }
   statusMseEl = document.getElementById("status-mse");
   syncSliderLabels();
   syncActivationSelectState();
   updateCopyButton();
   updateCaptureButton();
+  updateTrainingAnimationButton();
   updateStatusPanel();
   updateDotButtons();
 }
@@ -809,6 +859,10 @@ function onParamChange(event) {
   }
 
   if (params.inputMode !== "draw") return;
+
+  if (changedKey === "animationEpochStep" || changedKey === "animationFrameMs") {
+    return;
+  }
 
   if (changedKey === "drawForwardOnly" && params.drawForwardOnly) {
     clampDrawnPointsToForwardX();
@@ -1127,6 +1181,16 @@ function updateDotButtons() {
     "There is no manually placed point to undo."
   );
   setActionDisabled(clearBtn, dotPoints.length === 0, "There are no points to clear.");
+  if (recordTrajectoryBtnEl) {
+    setActionDisabled(
+      recordTrajectoryBtnEl,
+      isTrajectoryRecording || dotPoints.length < 2,
+      isTrajectoryRecording
+        ? "Trajectory Search is already being recorded."
+        : "Place an active soldier and at least one target before recording generations."
+    );
+    recordTrajectoryBtnEl.textContent = isTrajectoryRecording ? "Recording generations..." : "Record generations";
+  }
 }
 
 function addDotPointAtMouse() {
@@ -1494,6 +1558,7 @@ function drawNetworkOverlay() {
 
 function updateStatusPanel() {
   if (!statusMseEl) return;
+  if (isTrainingAnimation) return;
 
   if (params.inputMode === "click") {
     const segments = Math.max(0, clickWaypoints.length - 1);
@@ -1919,6 +1984,184 @@ function updateCaptureButton() {
   if (!captureBtnEl) return;
   setActionDisabled(captureBtnEl, isCapturing, "Graphwar field capture is already in progress.");
   captureBtnEl.textContent = isCapturing ? "Capturing..." : "Capture field";
+}
+
+function updateTrainingAnimationButton() {
+  if (!recordTrainingBtnEl) return;
+  const unavailable = !usesFeatureNetwork();
+  setActionDisabled(
+    recordTrainingBtnEl,
+    isTrainingAnimation || unavailable,
+    isTrainingAnimation
+      ? "Training animation is already being recorded."
+      : "Training epochs are available for Sigmoid, Taylor, and Fourier methods only."
+  );
+  recordTrainingBtnEl.textContent = isTrainingAnimation ? "Recording training..." : "Record training video";
+}
+
+function createAnimatedNetwork() {
+  trainingData = buildTrainingData(drawnPoints);
+  if (trainingData.length < 2) return null;
+  syncLinearWaypointsFromDataset();
+  approxXMin = trainingData[0].x;
+  approxXMax = trainingData[trainingData.length - 1].x;
+  linearMse = computeMseOnData((x) => evalLinearWaypoints(linearWaypoints, x), trainingData);
+  splineModel = null;
+  const fitData = buildWeightedTrainingData(trainingData);
+
+  if (params.approxMethod === "sigmoid") {
+    network = new SigmoidNetwork(params.numNeurons, params.sigmoidK);
+    network.initFromData(trainingData, approxXMin, approxXMax, { stepHeights: params.stepHeights });
+    return () => network.trainEpoch(fitData, approxXMin, approxXMax, params.trainLr, params.freezeX0);
+  }
+  if (params.approxMethod === "taylor") {
+    network = new TaylorNetwork(params.taylorOrder, params.taylorHiddenLayers, params.taylorHiddenSize, params.mlpActivation ?? "tanh");
+  } else if (params.approxMethod === "fourier") {
+    network = new FourierNetwork(params.fourierHarmonics, params.fourierHiddenLayers, params.fourierHiddenSize, params.mlpActivation ?? "tanh");
+  } else {
+    return null;
+  }
+  network.initFromData(trainingData, approxXMin, approxXMax);
+  return () => network.trainEpoch(fitData, params.trainLr);
+}
+
+function nextAnimationFrame(delayMs) {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, delayMs));
+  });
+}
+
+function startCanvasRecording(canvas) {
+  if (!window.MediaRecorder || !canvas?.captureStream) return null;
+  const stream = canvas.captureStream(30);
+  const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
+    .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  const chunks = [];
+  recorder.addEventListener("dataavailable", (event) => {
+    if (event.data.size > 0) chunks.push(event.data);
+  });
+  const finished = new Promise((resolve) => {
+    recorder.addEventListener("stop", () => {
+      stream.getTracks().forEach((track) => track.stop());
+      resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
+    }, { once: true });
+  });
+  recorder.start(250);
+  return { recorder, finished };
+}
+
+async function saveRecording(blob, kind) {
+  const response = await fetch("/api/recordings", {
+    method: "POST",
+    headers: {
+      "Content-Type": blob.type || "video/webm",
+      "X-Recording-Kind": kind,
+    },
+    body: blob,
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.error || "Video could not be saved");
+  return data.relative_path;
+}
+
+async function recordTrainingAnimation() {
+  if (!trainingRecordingEnabled || isTrainingAnimation || !usesFeatureNetwork()) return;
+  readParamsFromUI();
+  if (params.inputMode !== "draw" || drawnPoints.length < 2) {
+    alert("Draw a curve with at least two points before recording training.");
+    return;
+  }
+  const canvas = document.querySelector("#canvas-container canvas");
+  const recording = startCanvasRecording(canvas);
+  if (!recording) {
+    alert("This browser cannot record the canvas. Use a current Chrome, Edge, or Firefox build.");
+    return;
+  }
+
+  isTrainingAnimation = true;
+  updateTrainingAnimationButton();
+  try {
+    const trainEpoch = createAnimatedNetwork();
+    if (!trainEpoch) throw new Error("Could not initialize training animation");
+    const totalEpochs = Math.max(1, Math.round(params.trainEpochs));
+    const epochsPerFrame = Math.max(1, Math.round(params.animationEpochStep));
+    let epoch = 0;
+    await nextAnimationFrame(params.animationFrameMs);
+    while (epoch < totalEpochs) {
+      const batch = Math.min(epochsPerFrame, totalEpochs - epoch);
+      let completedBatch = true;
+      for (let index = 0; index < batch; index += 1) {
+        if (!trainEpoch()) {
+          completedBatch = false;
+          break;
+        }
+        epoch += 1;
+      }
+      network.mse = computeMseOnData((x) => network.predict(x), trainingData);
+      if (params.approxMethod === "sigmoid") sigmoidMse = network.mse;
+      if (params.approxMethod === "taylor") taylorMse = network.mse;
+      if (params.approxMethod === "fourier") fourierMse = network.mse;
+      if (statusMseEl) statusMseEl.textContent = `Recording: epoch ${epoch}/${totalEpochs}  |  MSE: ${formatMse(network.mse)}`;
+      await nextAnimationFrame(params.animationFrameMs);
+      if (!completedBatch || !Number.isFinite(network.mse)) break;
+    }
+    recording.recorder.stop();
+    const relativePath = await saveRecording(await recording.finished, "training");
+    updateStatusMse();
+    console.info(`[training video] saved ${relativePath}`);
+  } catch (error) {
+    if (recording.recorder.state !== "inactive") recording.recorder.stop();
+    await recording.finished;
+    alert(`Training video was not saved: ${error.message || error}`);
+  } finally {
+    isTrainingAnimation = false;
+    updateTrainingAnimationButton();
+    updateCopyButton();
+  }
+}
+
+async function recordTrajectorySearch() {
+  if (!trainingRecordingEnabled || isTrajectoryRecording) return;
+  readParamsFromUI();
+  if (dotPoints.length < 2) {
+    alert("Place an active soldier and at least one target before recording generations.");
+    return;
+  }
+  if (params.dotAvoidForbidden && !forbiddenGrid) {
+    alert(forbiddenError || "Capture a field first, or disable “Avoid detected black zones”.");
+    return;
+  }
+  const canvas = document.querySelector("#canvas-container canvas");
+  const recording = startCanvasRecording(canvas);
+  if (!recording) {
+    alert("This browser cannot record the canvas. Use a current Chrome, Edge, or Firefox build.");
+    return;
+  }
+
+  isTrajectoryRecording = true;
+  updateDotButtons();
+  try {
+    startDotEvolution();
+    if (!dotEvolution || !dotRunning) throw new Error("Could not start Trajectory Search");
+    const finalGeneration = dotEvolution.generation + Math.max(2, Math.round(params.trajectoryRecordGenerations));
+    while (dotEvolution && dotEvolution.generation < finalGeneration) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    stopDotEvolution();
+    recording.recorder.stop();
+    const relativePath = await saveRecording(await recording.finished, "trajectory");
+    console.info(`[trajectory video] saved ${relativePath}`);
+  } catch (error) {
+    stopDotEvolution();
+    if (recording.recorder.state !== "inactive") recording.recorder.stop();
+    await recording.finished;
+    alert(`Trajectory video was not saved: ${error.message || error}`);
+  } finally {
+    isTrajectoryRecording = false;
+    updateDotButtons();
+    updateCopyButton();
+  }
 }
 
 async function captureGameField() {
