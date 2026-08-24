@@ -6,7 +6,7 @@
 
 [Graphwar](https://github.com/catabriga/graphwar) is an artillery game where mathematical functions become projectile trajectories. GraphBot is a local visual laboratory for constructing those functions: click a route, draw a curve for approximation, or search for a trajectory with an evolving population—then copy a Graphwar-ready expression.
 
-**[Browse GraphBot screenshots on Steam →](https://steamcommunity.com/id/*KroSheChKa*/screenshots/?appid=1899700&sort=score&browsefilter=myfiles&view=grid#scrollTop=200)**
+**[Browse GraphBot screenshots on Steam →](https://steamcommunity.com/id/_KroSheChKa_/screenshots/?appid=1899700)**
 
 <!-- Planned hero media: docs/media/hero-demo.gif. The exact storyboard and export requirements live in docs/media/README.md. Add the asset here when it is ready; intentionally no placeholder or broken image is shown. -->
 
