@@ -83,54 +83,57 @@ class SigmoidNetwork {
     this.sanitizeParams();
   }
 
-  trainEpoch(data, xMin, xMax, lr = 0.08, freezeX0 = true) {
-    if (data.length === 0) return false;
+  train(data, xMin, xMax, epochs = 4000, lr = 0.08, freezeX0 = true) {
+    if (epochs <= 0 || data.length === 0) {
+      this.mse = this.computeMse(data);
+      return this.mse;
+    }
+
     const safeLr = Math.min(lr, 0.05);
-    const n = data.length;
-    let gradBias = 0;
-    const gradW = new Array(this.numNeurons).fill(0);
-    const gradX0 = new Array(this.numNeurons).fill(0);
 
-    for (const pt of data) {
-      const { y: pred, hidden } = this.forward(pt.x);
-      if (!Number.isFinite(pred)) {
-        this.sanitizeParams();
-        return false;
-      }
+    for (let epoch = 0; epoch < epochs; epoch++) {
+      const n = data.length;
+      let gradBias = 0;
+      const gradW = new Array(this.numNeurons).fill(0);
+      const gradX0 = new Array(this.numNeurons).fill(0);
 
-      const err = pred - pt.y;
-      const grad = (2 / n) * err;
+      for (const pt of data) {
+        const { y: pred, hidden } = this.forward(pt.x);
+        if (!Number.isFinite(pred)) {
+          this.sanitizeParams();
+          break;
+        }
 
-      if (!Number.isFinite(grad)) continue;
+        const err = pred - pt.y;
+        const grad = (2 / n) * err;
 
-      gradBias += grad;
+        if (!Number.isFinite(grad)) continue;
 
-      for (let i = 0; i < this.numNeurons; i++) {
-        const s = hidden[i];
-        gradW[i] += grad * s;
-        if (!freezeX0) {
-          const ds = s * (1 - s);
-          gradX0[i] += grad * this.w[i] * ds * (-this.k);
+        gradBias += grad;
+
+        for (let i = 0; i < this.numNeurons; i++) {
+          const s = hidden[i];
+          gradW[i] += grad * s;
+          if (!freezeX0) {
+            const ds = s * (1 - s);
+            gradX0[i] += grad * this.w[i] * ds * (-this.k);
+          }
         }
       }
-    }
 
-    this.bias -= safeLr * gradBias;
-    for (let i = 0; i < this.numNeurons; i++) {
-      this.w[i] -= safeLr * gradW[i];
-      if (!freezeX0) {
-        this.x0[i] -= safeLr * gradX0[i];
-        this.x0[i] = clamp(this.x0[i], xMin - 5, xMax + 5);
+      this.bias -= safeLr * gradBias;
+      for (let i = 0; i < this.numNeurons; i++) {
+        this.w[i] -= safeLr * gradW[i];
+        if (!freezeX0) {
+          this.x0[i] -= safeLr * gradX0[i];
+          this.x0[i] = clamp(this.x0[i], xMin - 5, xMax + 5);
+        }
       }
-    }
 
-    this.sanitizeParams();
-    return Number.isFinite(this.bias) && this.w.every((w) => Number.isFinite(w));
-  }
-
-  train(data, xMin, xMax, epochs = 4000, lr = 0.08, freezeX0 = true) {
-    for (let epoch = 0; epoch < epochs; epoch++) {
-      if (!this.trainEpoch(data, xMin, xMax, lr, freezeX0)) break;
+      this.sanitizeParams();
+      if (!Number.isFinite(this.bias) || this.w.some((w) => !Number.isFinite(w))) {
+        break;
+      }
     }
 
     this.mse = this.computeMse(data);
@@ -181,6 +184,26 @@ class SigmoidNetwork {
     }
 
     return `y=${parts.join("+")}`;
+  }
+
+  supportsDerivative(order) {
+    return (order === 1 || order === 2);
+  }
+
+  toDesmosDerivativeText(order = 1, minWeight = 0.005) {
+    if (order < 1 || order > 2) return null;
+    const parts = [];
+    for (let i = 0; i < this.numNeurons; i++) {
+      if (!Number.isFinite(this.w[i]) || Math.abs(this.w[i]) < minWeight) continue;
+      const w = round3(this.w[i]);
+      const x0 = round3(this.x0[i]);
+      if (w === null || x0 === null) continue;
+      const k = this.k;
+      const sig = `1/(1+exp(-${k}*(x-${x0})))`;
+      if (order === 1) parts.push(`${w}*${k}*${sig}*(1-${sig})`);
+      else parts.push(`${w}*${k}^2*${sig}*(1-${sig})*(1-2*${sig})`);
+    }
+    return parts.length > 0 ? `${order === 1 ? "y'" : "y''"}=${parts.join("+")}` : `${order === 1 ? "y'" : "y''"}=0`;
   }
 }
 
@@ -346,51 +369,58 @@ class FeatureMlpNetwork {
     }
   }
 
-  trainEpoch(data, lr = 0.02) {
-    if (data.length === 0 || this.layers.length === 0) return false;
+  train(data, epochs = 4000, lr = 0.02) {
+    if (epochs <= 0 || data.length === 0 || this.layers.length === 0) {
+      this.mse = this.computeMse(data);
+      return this.mse;
+    }
+
     const safeLr = Math.min(lr, 0.2);
     const gradW = this.layers.map((layer) => layer.W.map((row) => row.map(() => 0)));
     const gradB = this.layers.map((layer) => layer.b.map(() => 0));
 
-    let badStep = false;
-    const n = data.length;
+    for (let epoch = 0; epoch < epochs; epoch++) {
+      for (let l = 0; l < this.layers.length; l++) {
+        for (let o = 0; o < gradW[l].length; o++) {
+          gradW[l][o].fill(0);
+        }
+        gradB[l].fill(0);
+      }
 
-    for (const pt of data) {
-      const { y, activations, preActivations } = this.forward(pt.x);
-      if (!Number.isFinite(y)) {
-        badStep = true;
+      let badStep = false;
+      const n = data.length;
+
+      for (const pt of data) {
+        const { y, activations, preActivations } = this.forward(pt.x);
+        if (!Number.isFinite(y)) {
+          badStep = true;
+          break;
+        }
+
+        const err = y - pt.y;
+        const gradOut = (2 / n) * err;
+        if (!Number.isFinite(gradOut)) continue;
+
+        this.accumulateGradients(gradOut, activations, preActivations, gradW, gradB);
+      }
+
+      if (badStep) {
+        this.sanitizeParams();
         break;
       }
 
-      const err = y - pt.y;
-      const gradOut = (2 / n) * err;
-      if (!Number.isFinite(gradOut)) continue;
-
-      this.accumulateGradients(gradOut, activations, preActivations, gradW, gradB);
-    }
-
-    if (badStep) {
-      this.sanitizeParams();
-      return false;
-    }
-
-    for (let l = 0; l < this.layers.length; l++) {
-      for (let o = 0; o < this.layers[l].W.length; o++) {
-        for (let i = 0; i < this.layers[l].W[o].length; i++) {
-          this.layers[l].W[o][i] -= safeLr * gradW[l][o][i];
+      for (let l = 0; l < this.layers.length; l++) {
+        for (let o = 0; o < this.layers[l].W.length; o++) {
+          for (let i = 0; i < this.layers[l].W[o].length; i++) {
+            this.layers[l].W[o][i] -= safeLr * gradW[l][o][i];
+          }
+          this.layers[l].b[o] -= safeLr * gradB[l][o];
         }
-        this.layers[l].b[o] -= safeLr * gradB[l][o];
       }
-    }
-    this.sanitizeParams();
-    return true;
 
-  }
-
-  train(data, epochs = 4000, lr = 0.02) {
-    for (let epoch = 0; epoch < epochs; epoch++) {
-      if (!this.trainEpoch(data, lr)) break;
+      this.sanitizeParams();
     }
+
     this.mse = this.computeMse(data);
     return this.mse;
   }
@@ -489,6 +519,26 @@ class FeatureMlpNetwork {
   toDesmosText(minWeight = 0.005) {
     if (this.numHiddenLayers === 0) return this.linearDesmosFromOutputLayer(minWeight);
     return this.mlpDesmosText(minWeight);
+  }
+
+  supportsDerivative(order) {
+    return (order === 1 || order === 2);
+  }
+
+  toDesmosDerivativeText(order = 1, minWeight = 0.005) {
+    if (order < 1 || order > 2) return null;
+    if (this.numHiddenLayers !== 0 || this.layers.length === 0) return null;
+    if (this instanceof TaylorNetwork) {
+      const coeffs = this.expandedXPowers(minWeight);
+      if (!coeffs) return null;
+      const dcoeffs = derivativeCoeffs(coeffs, order);
+      if (!dcoeffs) return null;
+      return taylorPolyDesmos(dcoeffs, minWeight, order);
+    }
+    if (this instanceof FourierNetwork) {
+      return fourierLinearDerivativeDesmos(this, order, minWeight);
+    }
+    return null;
   }
 }
 
@@ -831,4 +881,99 @@ function sampleYFromData(data, x) {
   }
 
   return data[data.length - 1].y;
+}
+
+/**
+ * Compute the nth derivative coefficients of a polynomial given its
+ * expanded x-power coefficients. order=1 → d[j] += coeffs[j+1]*(j+1),
+ * order=2 → d[j] += coeffs[j+2]*(j+2)*(j+1).
+ */
+function derivativeCoeffs(coeffs, order) {
+  const d = new Array(coeffs.length).fill(0);
+  if (order <= 0) return coeffs.slice();
+  for (let i = 0; i < coeffs.length; i++) {
+    let val = coeffs[i];
+    for (let k = 0; k < order; k++) val = val * (i - k);
+    const idx = i - order;
+    if (idx >= 0 && idx < d.length) d[idx] += val;
+  }
+  return d;
+}
+
+/**
+ * Convert derivative coefficients into a Desmos-compatible equation string
+ * with the appropriate y' / y'' prefix. Mirrors xPolynomialDesmosText but
+ * prefixes with the derivative variable name.
+ */
+function taylorPolyDesmos(coeffs, minWeight = 0.005, order = 1) {
+  const parts = [];
+  const prefix = order === 1 ? "y'" : "y''";
+  for (let i = 0; i < coeffs.length; i++) {
+    if (!Number.isFinite(coeffs[i]) || Math.abs(coeffs[i]) < minWeight) continue;
+    const c = round3(coeffs[i]);
+    if (c === null) continue;
+    if (i === 0) parts.push(`${c}`);
+    else if (i === 1) parts.push(`${c}*x`);
+    else parts.push(`${c}*x^${i}`);
+  }
+  return parts.length > 0 ? `${prefix}=${parts.join("+")}` : `${prefix}=0`;
+}
+
+/**
+ * Analytic first/second derivative of a zero-hidden-layer Fourier network.
+ * y = w0 + Σ [w_c_k * cos(k*PI*t) + w_s_k * sin(k*PI*t)], t = (x-c)/s
+ * y' = (1/s) * Σ k*PI * [-w_c_k * sin(k*PI*t) + w_s_k * cos(k*PI*t)]
+ * y'' = (1/s^2) * Σ (k*PI)^2 * [-w_c_k * cos(k*PI*t) - w_s_k * sin(k*PI*t)]
+ */
+function fourierLinearDerivativeDesmos(network, order = 1, minWeight = 0.005) {
+  if (!network || network.layers.length === 0) return null;
+  const last = network.layers[network.layers.length - 1];
+  const W = last.W[0];
+  const t = network.desmosTVar();
+  const invS = 1 / network.scale;
+  const prefix = order === 1 ? "y'" : "y''";
+  const parts = [];
+
+  // W[0] is the constant bias (derivative is zero), skip it.
+  // W[1] = cos(1·angle), W[2] = sin(1·angle), W[3] = cos(2·angle), ...
+  let idx = 1;
+  for (let k = 1; k <= network.harmonics; k++) {
+    const kcoeff = round4(k * FOURIER_PI);
+    if (kcoeff === null || Math.abs(kcoeff) < 1e-9) {
+      idx += 2;
+      continue;
+    }
+    const angle = `${kcoeff}*(${t})`;
+    const wc = W[idx];
+    const ws = W[idx + 1];
+    idx += 2;
+
+    if (order === 1) {
+      // d/dx cos(angle) = -(kcoeff/s) * sin(angle)
+      // d/dx sin(angle) =  (kcoeff/s) * cos(angle)
+      if (wc !== null && Math.abs(wc) >= minWeight) {
+        const c = round3(wc * kcoeff * invS);
+        if (c !== null) parts.push(`${c}*(-sin(${angle}))`);
+      }
+      if (ws !== null && Math.abs(ws) >= minWeight) {
+        const c = round3(ws * kcoeff * invS);
+        if (c !== null) parts.push(`${c}*cos(${angle})`);
+      }
+    } else {
+      // d²/dx² cos(angle) = -(kcoeff/s)² * cos(angle)
+      // d²/dx² sin(angle) = -(kcoeff/s)² * sin(angle)
+      const k2 = kcoeff * kcoeff;
+      const invS2 = invS * invS;
+      if (wc !== null && Math.abs(wc) >= minWeight) {
+        const c = round3(wc * k2 * invS2);
+        if (c !== null) parts.push(`${c}*(-cos(${angle}))`);
+      }
+      if (ws !== null && Math.abs(ws) >= minWeight) {
+        const c = round3(ws * k2 * invS2);
+        if (c !== null) parts.push(`${c}*(-sin(${angle}))`);
+      }
+    }
+  }
+
+  return parts.length > 0 ? `${prefix}=${normalizeFormula(parts.join("+"))}` : `${prefix}=0`;
 }

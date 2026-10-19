@@ -1,4 +1,5 @@
 .venv/
+.kilo/
 __pycache__/
 *.pyc
 

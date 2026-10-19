@@ -14,6 +14,38 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+try:
+    from flask import Flask, request, jsonify
+    HAS_FLASK = True
+except Exception:
+    Flask = None
+    request = None
+    jsonify = None
+    HAS_FLASK = False
+
+# Optional symbolic engines for /api/derive.  The server must still import and
+# serve captures when these are unavailable.
+USE_SYMENGINE = False
+se = None
+try:
+    import symengine as se
+    USE_SYMENGINE = True
+except Exception:
+    se = None
+    USE_SYMENGINE = False
+
+USE_SYMPY = False
+symbols = None
+sympify = None
+diff = None
+simplify = None
+try:
+    from sympy import symbols as _symbols, sympify as _sympify, diff as _diff, simplify as _simplify
+    symbols, sympify, diff, simplify = _symbols, _sympify, _diff, _simplify
+    USE_SYMPY = True
+except Exception:
+    USE_SYMPY = False
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
@@ -27,6 +59,8 @@ PORT = 8765
 SERVER_URL = f"http://{HOST}:{PORT}/"
 MAX_RECORDING_BYTES = 256 * 1024 * 1024
 RECORDING_ENABLED = False
+
+app = Flask(__name__) if HAS_FLASK else None
 
 
 class ApproximatorHandler(BaseHTTPRequestHandler):
@@ -164,6 +198,47 @@ def parse_args():
     return parser.parse_args()
 
 
+def derive():
+    try:
+        data = request.get_json(silent=True) or {}
+        expr = (data.get('expr') or '').strip()
+        order = int(data.get('order') or 0)
+        if order < 0:
+            order = 0
+        if order > 3:
+            order = 3
+        if USE_SYMENGINE and se is not None:
+            try:
+                x = se.Symbol('x')
+                f = se.sympify(expr)
+                for _ in range(order):
+                    f = se.diff(f, x)
+                return jsonify({'ok': True, 'formula': _to_js_formula(f)})
+            except Exception as e:
+                pass  # fallback
+        if USE_SYMPY:
+            try:
+                x = symbols('x')
+                f = sympify(expr, evaluate=True)
+                for _ in range(order):
+                    f = diff(f, x)
+                try:
+                    f = simplify(f)
+                except Exception:
+                    pass
+                return jsonify({'ok': True, 'formula': _to_js_formula(f)})
+            except Exception as e:
+                return jsonify({'ok': False, 'error': str(e)[:200]})
+        return jsonify({'ok': False, 'error': 'no symbolic engine available'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]})
+
+
+
+if HAS_FLASK and app is not None:
+    app.add_url_rule("/api/derive", "derive", derive, methods=["POST"])
+
+
 def main():
     global RECORDING_ENABLED
     args = parse_args()
@@ -188,3 +263,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+def _to_js_formula(s):
+    if s is None:
+        return ''
+    t = str(s)
+    # normalize
+    t = t.replace('**', '^')
+    t = t.replace('Abs(', 'abs(')
+    t = t.replace('log(', 'ln(')  # sympy log is natural; prefer ln
+    return t
+
+
+

@@ -63,6 +63,10 @@ class CubicSplineModel {
   toFormulaText(decimals = 14) {
     return piecewiseCubicFormulaText(this.intervals, decimals);
   }
+
+  toDerivativeFormulaText(order = 1, decimals = 14) {
+    return piecewiseCubicDerivativeFormulaText(this.intervals, order, decimals);
+  }
 }
 
 class BSplineModel {
@@ -155,6 +159,10 @@ class BSplineModel {
   toFormulaText(decimals = 14) {
     return piecewiseCubicFormulaText(this.intervals, decimals);
   }
+
+  toDerivativeFormulaText(order = 1, decimals = 14) {
+    return piecewiseCubicDerivativeFormulaText(this.intervals, order, decimals);
+  }
 }
 
 function intervalIndex(intervals, x) {
@@ -246,4 +254,41 @@ function normalizeSplineFormula(text) {
   return String(text)
     .replace(/\+\s*-/g, "-")
     .replace(/-\s*-/g, "+");
+}
+
+
+function piecewiseCubicDerivativeFormulaText(intervals, order = 1, decimals = 14) {
+  if (!intervals || intervals.length === 0) return null;
+  const terms = [];
+  const first = intervals[0];
+  const baseX = splineNumber(first.x, decimals);
+  if (order === 1) {
+    const a1 = first.b;
+    const b1 = 2 * first.c;
+    const c1 = 3 * first.d;
+    terms.push(splinePolynomial(a1, b1, c1, 0, `x - ${baseX}`, decimals));
+    for (let i = 1; i < intervals.length; i++) {
+      const deltaD = intervals[i].d - intervals[i - 1].d;
+      if (Math.abs(deltaD) < 10 ** (-(decimals + 1))) continue;
+      const coeff = 3 * deltaD;
+      const knot = splineNumber(intervals[i].x, decimals);
+      const positivePart = `((x - ${knot}) + abs(x - ${knot}))/2`;
+      terms.push(`${splineNumber(coeff, decimals)}*(${positivePart})^2`);
+    }
+    return terms.length > 0 ? `y'=${normalizeSplineFormula(terms.join(" + "))}` : null;
+  } else if (order === 2) {
+    const a2 = 2 * first.c;
+    const b2 = 6 * first.d;
+    terms.push(splinePolynomial(a2, b2, 0, 0, `x - ${baseX}`, decimals));
+    for (let i = 1; i < intervals.length; i++) {
+      const deltaD = intervals[i].d - intervals[i - 1].d;
+      if (Math.abs(deltaD) < 10 ** (-(decimals + 1))) continue;
+      const coeff = 6 * deltaD;
+      const knot = splineNumber(intervals[i].x, decimals);
+      const positivePart = `((x - ${knot}) + abs(x - ${knot}))/2`;
+      terms.push(`${splineNumber(coeff, decimals)}*(${positivePart})`);
+    }
+    return terms.length > 0 ? `y''=${normalizeSplineFormula(terms.join(" + "))}` : null;
+  }
+  return null;
 }

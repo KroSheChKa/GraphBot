@@ -24,6 +24,7 @@ const CANVAS_HEIGHT = CANVAS_WIDTH / ASPECT;
 const DEFAULT_PARAMS = {
   inputMode: "click",
   autoDetectActive: true,
+  autoDetectEnemies: true,
   drawForwardOnly: false,
   approxMethod: "sigmoid",
   sampleStep: 0.5,
@@ -105,6 +106,9 @@ let approxXMax = null;
 let isDrawing = false;
 let controlsEl;
 let statusMseEl;
+let copyFormulaBtnEl;
+let copyFormulaKindEl;
+let copyYBtnEl;
 let copyBtnEl;
 let captureBtnEl;
 let recordTrainingBtnEl;
@@ -123,6 +127,7 @@ let forbiddenStats = null;
 let forbiddenError = null;
 let activeAnchor = null;
 let capturedActiveAnchor = null;
+let capturedEnemyTargets = [];
 
 function clonePoint(point) {
   return { x: Number(point.x), y: Number(point.y) };
@@ -166,6 +171,27 @@ function applyActiveDetectionPreference() {
   }
   updateStatusPanel();
   updateCopyButton();
+}
+
+function applyEnemyDetectionPreference() {
+  if (params.inputMode === "dot") {
+    dotPoints = activeAnchor ? [clonePoint(anchorPoint())] : [];
+  } else if (params.inputMode === "click") {
+    clickPoints = activeAnchor ? [clonePoint(anchorPoint())] : [];
+  }
+  if (params.autoDetectEnemies && capturedEnemyTargets.length) {
+    const points = capturedEnemyTargets
+      .map((target) => ({
+        x: constrain(Number(target?.game?.x), X_MIN, X_MAX),
+        y: constrain(Number(target?.game?.y), Y_MIN, Y_MAX),
+      }))
+      .sort((a, b) => a.x - b.x);
+    if (params.inputMode === "dot") dotPoints.push(...points);
+    else if (params.inputMode === "click") clickPoints.push(...points);
+  }
+  updateStatusPanel();
+  updateCopyButton();
+  updateDotButtons();
 }
 
 function anchorStatusText() {
@@ -439,6 +465,7 @@ function buildControlsPanel() {
         ${actionButton("btn-dot-stop", "Stop", { secondary: true })}
         ${actionButton("btn-dot-undo", "Undo point", { secondary: true })}
         ${actionButton("btn-dot-clear", "Clear points", { secondary: true })}
+${actionButton("btn-dot-add-enemies", "Add detected enemies", { secondary: true })}
         ${trainingRecordingEnabled ? actionButton("btn-record-trajectory", "Record generations", { secondary: true }) : ""}
       </div>
     </div>
@@ -484,10 +511,18 @@ function buildControlsPanel() {
   }
 
   controlsEl.innerHTML = `
-    ${actionButton("btn-copy-formula", "Copy y", { disabled: true })}
+    <div class="copy-group">
+      <select id="copy-formula-kind" class="copy-kind-select" aria-label="Formula to copy">
+        <option value="0">y</option>
+        <option value="1">y'</option>
+        <option value="2">y''</option>
+      </select>
+      ${actionButton("btn-copy-formula", "Copy formula", { disabled: true })}
+    </div>
     <h2>Parameters</h2>
     ${actionButton("btn-capture-field", "Capture field")}
     ${controlCheckbox("autoDetectActive", "Auto-detect active player", params.autoDetectActive, "Finds the player's yellow body and circular active marker after capture. Disable it to place the purple A marker manually.")}
+  ${controlCheckbox("autoDetectEnemies", "Auto-detect enemy targets", params.autoDetectEnemies, "After capture, adds detected right-side enemies as targets, ordered left to right. Disable to place targets manually.")}
     ${controlInputModePicker()}
     ${modeSpecificControls}
     ${actionButton("btn-reset", "Reset all", { secondary: true })}
@@ -526,14 +561,26 @@ function buildControlsPanel() {
   if (dotStopBtn) dotStopBtn.addEventListener("click", stopDotEvolution);
   const dotUndoBtn = document.getElementById("btn-dot-undo");
   if (dotUndoBtn) dotUndoBtn.addEventListener("click", undoLastDotPoint);
-  const dotClearBtn = document.getElementById("btn-dot-clear");
-  if (dotClearBtn) dotClearBtn.addEventListener("click", clearDotPoints);
+const dotClearBtn = document.getElementById("btn-dot-clear");
+if (dotClearBtn) dotClearBtn.addEventListener("click", clearDotPoints);
+const dotAddEnemiesBtn = document.getElementById("btn-dot-add-enemies");
+if (dotAddEnemiesBtn) dotAddEnemiesBtn.addEventListener("click", () => {
+  params.autoDetectEnemies = true;
+  applyEnemyDetectionPreference();
+});
   document.getElementById("btn-reset").addEventListener("click", resetParams);
-  copyBtnEl = document.getElementById("btn-copy-formula");
-  copyBtnEl.addEventListener("click", (event) => {
-    event.preventDefault();
-    copyActiveFormula();
-  });
+  copyFormulaBtnEl = document.getElementById("btn-copy-formula");
+  copyFormulaKindEl = document.getElementById("copy-formula-kind");
+  copyYBtnEl = copyFormulaBtnEl;
+  if (copyFormulaBtnEl) {
+    copyFormulaBtnEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      copySelectedFormula();
+    });
+  }
+  if (copyFormulaKindEl) {
+    copyFormulaKindEl.addEventListener("change", () => updateCopyButton());
+  }
   captureBtnEl = document.getElementById("btn-capture-field");
   captureBtnEl.addEventListener("click", (event) => {
     event.preventDefault();
@@ -824,6 +871,7 @@ function onParamChange(event) {
   if (!changedKey) return;
   if (input.type === "radio" && !input.checked) return;
 
+  clearDerivativeCache();
   const prevInputMode = params.inputMode;
   const prevMethod = params.approxMethod;
   const prevValue = params[changedKey];
@@ -840,6 +888,13 @@ function onParamChange(event) {
 
   if (changedKey === "autoDetectActive") {
     applyActiveDetectionPreference();
+    updateStatusPanel();
+    updateCopyButton();
+    return;
+  }
+
+  if (changedKey === "autoDetectEnemies") {
+    applyEnemyDetectionPreference();
     updateStatusPanel();
     updateCopyButton();
     return;
@@ -917,6 +972,9 @@ function resetParams() {
   clearWorkspaceState({ keepAnchor: false });
   if (params.autoDetectActive && capturedActiveAnchor) {
     setActiveAnchor(capturedActiveAnchor);
+  }
+  if (params.autoDetectEnemies && capturedEnemyTargets.length) {
+    applyEnemyDetectionPreference();
   }
   buildControlsPanel();
   if (params.inputMode === "draw" && drawnPoints.length > 0) rerunPipeline();
@@ -1706,6 +1764,7 @@ function clearWorkspaceState({ keepAnchor = true } = {}) {
   dotEvolution = null;
   dotGenerationStartedAt = 0;
   if (keepAnchor) seedAnchorPoints();
+  clearDerivativeCache();
   updateStatusPanel();
   updateCopyButton();
   updateDotButtons();
@@ -1782,7 +1841,8 @@ function evalDirectLineSegment(p1, p2, x) {
   if (Math.abs(dx) < 1e-12) {
     dx = y1 !== y2 ? 1e-6 : 1e-6;
   }
-  const dist = -((y1 - y2) / 2) / dx;
+  const m = (y2 - y1) / dx;
+  const dist = m / 2;
   return dist * (Math.abs(x - x1) - Math.abs(x - x2));
 }
 
@@ -1821,14 +1881,18 @@ function buildWeightedTrainingData(data) {
   const anchor = activeAnchor.point;
   const dataMinX = data[0].x;
   const dataMaxX = data[data.length - 1].x;
-  // Do not extend a stroke back to the soldier. If drawing starts elsewhere,
-  // A is outside the stroke's x-domain and should not affect its fit.
-  if (anchor.x < dataMinX - 1e-9 || anchor.x > dataMaxX + 1e-9) {
-    return data.map((point) => clonePoint(point));
-  }
 
   const weighted = [];
   let anchorIncluded = false;
+
+  // Anchor the fit at the soldier's position when drawing starts to the right
+  // of A, so Taylor/Fourier/sigmoid curves begin at the active soldier.
+  if (anchor.x < dataMinX - 1e-9) {
+    for (let i = 0; i < ACTIVE_ANCHOR_WEIGHT; i++) {
+      weighted.push({ x: anchor.x, y: anchor.y });
+    }
+  }
+
   for (const point of data) {
     const isAnchor =
       Math.abs(point.x - anchor.x) <= 1e-9 &&
@@ -1837,10 +1901,12 @@ function buildWeightedTrainingData(data) {
     const copies = isAnchor ? ACTIVE_ANCHOR_WEIGHT : 1;
     for (let i = 0; i < copies; i++) weighted.push(clonePoint(point));
   }
-  if (!anchorIncluded) {
+
+  if (!anchorIncluded && anchor.x >= dataMinX - 1e-9 && anchor.x <= dataMaxX + 1e-9) {
     for (let i = 0; i < ACTIVE_ANCHOR_WEIGHT; i++) weighted.push(clonePoint(anchor));
     weighted.sort((a, b) => a.x - b.x);
   }
+
   return weighted;
 }
 
@@ -1854,8 +1920,80 @@ function directLineFormula(p1, p2, useGamePrecision = false) {
   if (Math.abs(dx) < 1e-12) {
     dx = y1 !== y2 ? verticalEps(y1, y2) : VERTICAL_MIN_EPS;
   }
-  const dist = round(-((y1 - y2) / 2) / dx);
+  const m = (y2 - y1) / dx;
+  const dist = round(m / 2);
   return `${dist}*(abs(x - ${x1}) - abs(x - ${x2}))`;
+}
+
+/**
+ * Analytic first derivative of a single click/linear segment.
+ * y_segment = d * (abs(x - x1) - abs(x - x2))  where d = m/2
+ * y'_segment  = d * ((x - x1)/abs(x - x1) - (x - x2)/abs(x - x2))
+ * This yields the slope m inside the interval and 0 outside it.
+ * The second derivative of a piecewise-linear function is 0 almost everywhere.
+ */
+function directLineDerivativeFormula(p1, p2, useGamePrecision = false) {
+  const round = useGamePrecision ? fmtGame : roundCoord;
+  const x1 = round(p1.x);
+  const x2 = round(p2.x);
+  const y1 = round(p1.y);
+  const y2 = round(p2.y);
+  let dx = x2 - x1;
+  if (Math.abs(dx) < 1e-12) {
+    dx = y1 !== y2 ? verticalEps(y1, y2) : VERTICAL_MIN_EPS;
+  }
+  const m = (y2 - y1) / dx;
+  const d = round(m / 2);
+  return `${d}*((x - ${x1})/abs(x - ${x1}) - (x - ${x2})/abs(x - ${x2}))`;
+}
+
+function deriveWithMathJS(expr, order, decimals = 14) {
+  if (!window.math) return null;
+  try {
+    const cleaned = String(expr).trim();
+    const node = math.parse(cleaned.startsWith("y=") ? cleaned.substring(2) : cleaned);
+    let d = node;
+    for (let i = 0; i < order; i++) {
+      d = math.derivative(d, "x");
+    }
+    const simple = math.simplify(d);
+    const text = simple.toString({ parenthesis: "auto" });
+    if (!text || text === "0" || text === "NaN" || text === "undefined") return null;
+    return text;
+  } catch (e) {
+    return null;
+  }
+}
+
+function waypointsDerivativeFormulaText(waypoints, useGamePrecision = false, includeYPrefix = true, order = 1) {
+  if (!waypoints || waypoints.length < 2) return null;
+  if (order !== 1 && order !== 2) return null;
+
+  // Piecewise-linear functions have a zero second derivative almost everywhere.
+  if (order === 2) {
+    return includeYPrefix ? "y''=0" : "0";
+  }
+
+  // Fast analytic path: sum of per-segment sign-based derivatives.
+  const parts = [];
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    parts.push(directLineDerivativeFormula(waypoints[i], waypoints[i + 1], useGamePrecision));
+  }
+  const body = normalizeFormula(parts.join(" + "));
+  if (body && body !== "0") {
+    const prefix = order === 1 ? "y'" : "y''";
+    return includeYPrefix ? `${prefix}=${body}` : body;
+  }
+
+  // Fall back to math.js symbolic differentiation if the analytic path yields nothing.
+  const expr = waypointsFormulaText(waypoints, useGamePrecision, false);
+  if (!expr) return null;
+  const mjsBody = deriveWithMathJS(expr, order);
+  if (!mjsBody) {
+    return includeYPrefix ? (order === 1 ? "y'=0" : "y''=0") : "0";
+  }
+  const prefix = order === 1 ? "y'" : "y''";
+  return includeYPrefix ? `${prefix}=${mjsBody.replace(new RegExp(`^${prefix}=`), "")}` : mjsBody;
 }
 
 function waypointsFormulaText(waypoints, useGamePrecision = false, includeYPrefix = true) {
@@ -1874,6 +2012,33 @@ function linearFormulaText(waypoints, useGamePrecision = false) {
 
 function clickFormulaText(waypoints) {
   return waypointsFormulaText(waypoints, true, false);
+}
+
+function linearDerivativeFormulaText(waypoints, useGamePrecision = false, order = 1) {
+  if (!waypoints || waypoints.length < 2) return null;
+  // Fast analytic path for piecewise-linear functions.
+  const analytic = waypointsDerivativeFormulaText(waypoints, useGamePrecision, true, order);
+  if (analytic) return analytic;
+  // Fall back to math.js symbolic differentiation.
+  const expr = linearFormulaText(waypoints);
+  if (!expr) return null;
+  const body = deriveWithMathJS(expr, order);
+  if (!body) return order === 1 ? "y'=0" : "y''=0";
+  const prefix = order === 1 ? "y'" : "y''";
+  return `${prefix}=${body.replace(new RegExp(`^${prefix}=`), "")}`;
+}
+function clickDerivativeFormulaText(waypoints, order = 1) {
+  if (waypoints.length < 2) return null;
+  // Fast analytic path for piecewise-linear click-mode functions.
+  const analytic = waypointsDerivativeFormulaText(waypoints, true, false, order);
+  if (analytic) return analytic;
+  // Fall back to math.js symbolic differentiation.
+  const expr = clickFormulaText(waypoints);
+  if (!expr) return null;
+  const body = deriveWithMathJS(expr, order);
+  if (!body) return order === 1 ? "y'=0" : "y''=0";
+  const prefix = order === 1 ? "y'" : "y''";
+  return `${prefix}=${body.replace(new RegExp(`^${prefix}=`), "")}`;
 }
 
 function getActiveFormulaText() {
@@ -1908,6 +2073,118 @@ function getActiveFormulaText() {
     formula = network.toDesmosText();
   }
   return formula ? normalizeFormula(formula) : null;
+}
+
+// Derivative result cache. Keyed by (formulaText, order). Self-invalidating:
+// when the underlying state changes, getActiveFormulaText() returns a
+// different string and we get a cache miss. Capped to avoid unbounded growth.
+const DERIVATIVE_CACHE_MAX = 64;
+const derivativeCache = new Map();
+const derivativeCacheKeys = [];
+
+function clearDerivativeCache() {
+  derivativeCache.clear();
+  derivativeCacheKeys.length = 0;
+}
+
+function getActiveDerivativeText(order) {
+  if (order !== 1 && order !== 2) return null;
+
+  const expr = getActiveFormulaText();
+  if (!expr) return null;
+
+  const cacheKey = `${expr}|${order}`;
+  const cached = derivativeCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let result = null;
+
+  // --- Analytic derivative paths (fast, no symbolic parsing) ---
+
+  // Sigmoid network: w·σ(k·(x−x0)) → w·k·σ·(1−σ) / w·k²·σ·(1−σ)·(1−2σ)
+  if (
+    params.inputMode === "draw" &&
+    params.approxMethod === "sigmoid" &&
+    network &&
+    typeof network.toDesmosDerivativeText === "function"
+  ) {
+    const analytic = network.toDesmosDerivativeText(order, 0.005);
+    if (analytic) result = analytic;
+  }
+  // Cubic / B-spline: analytic piecewise-cubic derivative formulas.
+  else if (
+    (params.inputMode === "draw" || params.inputMode === "dot") &&
+    params.approxMethod === "spline" &&
+    splineModel &&
+    typeof splineModel.toDerivativeFormulaText === "function"
+  ) {
+    const decimals = Math.max(
+      8,
+      Math.min(14, Math.round(Number(params.splineFormulaPrecision) || 14))
+    );
+    const analytic = splineModel.toDerivativeFormulaText(order, decimals);
+    if (analytic) result = analytic;
+  }
+  // Taylor / polynomial (no hidden layers): analytic coefficient differentiation.
+  else if (
+    params.inputMode === "draw" &&
+    params.approxMethod === "taylor" &&
+    network instanceof TaylorNetwork &&
+    network.numHiddenLayers === 0
+  ) {
+    const coeffs = network.expandedXPowers(0.005);
+    if (coeffs) {
+      const dcoeffs = derivativeCoeffs(coeffs, order);
+      if (dcoeffs) result = taylorPolyDesmos(dcoeffs, 0.005, order);
+    }
+  }
+  // Fourier (no hidden layers): analytic term-by-term differentiation.
+  else if (
+    params.inputMode === "draw" &&
+    params.approxMethod === "fourier" &&
+    network instanceof FourierNetwork &&
+    network.numHiddenLayers === 0
+  ) {
+    const analytic = fourierLinearDerivativeDesmos(network, order, 0.005);
+    if (analytic) result = analytic;
+  }
+  // Click / linear: analytic piecewise-linear segment derivatives.
+  else if (
+    params.inputMode === "click" ||
+    params.approxMethod === "linear"
+  ) {
+    const waypoints =
+      params.inputMode === "click" ? clickWaypoints : linearWaypoints;
+    if (waypoints && waypoints.length >= 2) {
+      const analytic = waypointsDerivativeFormulaText(
+        waypoints,
+        params.inputMode === "click",
+        true,
+        order
+      );
+      if (analytic) result = analytic;
+    }
+  }
+
+  // --- Fallback: math.js symbolic differentiation ---
+  if (!result) {
+    const body = deriveWithMathJS(expr, order);
+    if (!body) return null;
+    const prefix = order === 1 ? "y'" : "y''";
+    result = `${prefix}=${body.replace(new RegExp(`^${prefix}=`), "")}`;
+  }
+
+  result = normalizeFormula(result);
+
+  // Cache with size cap (evict oldest).
+  if (derivativeCache.size >= DERIVATIVE_CACHE_MAX) {
+    const oldest = derivativeCacheKeys.shift();
+    if (oldest !== undefined) derivativeCache.delete(oldest);
+  }
+  derivativeCache.set(cacheKey, result);
+  derivativeCacheKeys.push(cacheKey);
+
+  return result;
 }
 
 function methodLabel(method = params.approxMethod) {
@@ -1958,26 +2235,59 @@ function logActiveFormula() {
 
 async function copyActiveFormula() {
   const formula = getActiveFormulaText();
-  if (!formula || !copyBtnEl) return;
-  const prev = copyBtnEl.textContent;
+  const btn = copyYBtnEl || copyBtnEl;
+  if (!formula || !btn) return;
+  const prev = btn.textContent;
   try {
     await navigator.clipboard.writeText(formula);
-    copyBtnEl.textContent = "Copied";
+    btn.textContent = "Copied";
   } catch {
-    copyBtnEl.textContent = "Error";
+    btn.textContent = "Error";
   }
   setTimeout(() => {
-    if (copyBtnEl) copyBtnEl.textContent = prev;
+    if (btn) btn.textContent = prev;
+  }, 1200);
+}
+
+async function copyDerivative(order) {
+  const formula = getActiveDerivativeText(order);
+  const btn = order === 1 ? copyY1BtnEl : copyY2BtnEl;
+  if (!formula || !btn) return;
+  const prev = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(formula);
+    btn.textContent = "Copied";
+  } catch {
+    btn.textContent = "Error";
+  }
+  setTimeout(() => {
+    if (btn) btn.textContent = prev;
+  }, 1200);
+}
+
+async function copySelectedFormula() {
+  const kind = copyFormulaKindEl ? Number(copyFormulaKindEl.value || 0) : 0;
+  const btn = copyFormulaBtnEl || copyYBtnEl;
+  if (!btn) return;
+  const formula = kind === 0 ? getActiveFormulaText() : getActiveDerivativeText(kind);
+  if (!formula) return;
+  const prev = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(formula);
+    btn.textContent = "Copied";
+  } catch {
+    btn.textContent = "Error";
+  }
+  setTimeout(() => {
+    if (btn) btn.textContent = prev;
   }, 1200);
 }
 
 function updateCopyButton() {
-  if (!copyBtnEl) return;
-  setActionDisabled(
-    copyBtnEl,
-    getActiveFormulaText() === null,
-    copyUnavailableReason()
-  );
+  if (!copyFormulaBtnEl) return;
+  const kind = copyFormulaKindEl ? Number(copyFormulaKindEl.value || 0) : 0;
+  const available = kind === 0 ? getActiveFormulaText() : getActiveDerivativeText(kind);
+  setActionDisabled(copyFormulaBtnEl, available === null, copyUnavailableReason());
 }
 
 function updateCaptureButton() {
@@ -2003,7 +2313,10 @@ function createAnimatedNetwork() {
   trainingData = buildTrainingData(drawnPoints);
   if (trainingData.length < 2) return null;
   syncLinearWaypointsFromDataset();
-  approxXMin = trainingData[0].x;
+  const anchorLeadsLeft = activeAnchor && activeAnchor.point.x < trainingData[0].x - 1e-9;
+  approxXMin = anchorLeadsLeft && usesFeatureNetwork()
+    ? activeAnchor.point.x
+    : trainingData[0].x;
   approxXMax = trainingData[trainingData.length - 1].x;
   linearMse = computeMseOnData((x) => evalLinearWaypoints(linearWaypoints, x), trainingData);
   splineModel = null;
@@ -2012,7 +2325,7 @@ function createAnimatedNetwork() {
   if (params.approxMethod === "sigmoid") {
     network = new SigmoidNetwork(params.numNeurons, params.sigmoidK);
     network.initFromData(trainingData, approxXMin, approxXMax, { stepHeights: params.stepHeights });
-    return () => network.trainEpoch(fitData, approxXMin, approxXMax, params.trainLr, params.freezeX0);
+    return () => network.train(fitData, approxXMin, approxXMax, params.trainLr, params.freezeX0);
   }
   if (params.approxMethod === "taylor") {
     network = new TaylorNetwork(params.taylorOrder, params.taylorHiddenLayers, params.taylorHiddenSize, params.mlpActivation ?? "tanh");
@@ -2022,7 +2335,7 @@ function createAnimatedNetwork() {
     return null;
   }
   network.initFromData(trainingData, approxXMin, approxXMax);
-  return () => network.trainEpoch(fitData, params.trainLr);
+  return () => network.train(fitData, params.trainLr);
 }
 
 function nextAnimationFrame(delayMs) {
@@ -2182,6 +2495,9 @@ async function captureGameField() {
         data.image,
         (img) => {
           bgImage = img;
+          // Size the canvas to the captured graph's native dimensions so the
+          // graph fills the UI container without scaling or truncation.
+          resizeCanvas(img.width, img.height);
           resolve();
         },
         (err) => reject(err)
@@ -2189,8 +2505,10 @@ async function captureGameField() {
     });
 
     capturedActiveAnchor = data.active_anchor || null;
+    capturedEnemyTargets = Array.isArray(data.detected_enemies) ? data.detected_enemies : [];
     clearWorkspaceState({ keepAnchor: false });
     if (params.autoDetectActive) setActiveAnchor(capturedActiveAnchor);
+    if (params.autoDetectEnemies) applyEnemyDetectionPreference();
     if (data.field_archive) {
       console.info(`[field archive] saved ${data.field_archive.relative_path}`);
     } else if (data.field_archive_error) {
@@ -2218,9 +2536,10 @@ async function captureGameField() {
       );
     }
     updateStatusPanel();
-  } catch {
+  } catch (error) {
+    console.error("captureGameField failed:", error);
     alert(
-      "Capture server unavailable.\nRun: python tools/approximator_server.py\nThen open http://127.0.0.1:8765/"
+      `Capture failed: ${error && error.message ? error.message : error}\nRun: python tools/approximator_server.py\nThen open http://127.0.0.1:8765/`
     );
   } finally {
     isCapturing = false;
@@ -2309,7 +2628,10 @@ function processPipeline({ logFormula = false } = {}) {
   }
 
   syncLinearWaypointsFromDataset();
-  approxXMin = trainingData[0].x;
+  const anchorLeadsLeft = activeAnchor && activeAnchor.point.x < trainingData[0].x - 1e-9;
+  approxXMin = anchorLeadsLeft && usesFeatureNetwork()
+    ? activeAnchor.point.x
+    : trainingData[0].x;
   approxXMax = trainingData[trainingData.length - 1].x;
   linearMse = computeMseOnData((x) => evalLinearWaypoints(linearWaypoints, x), trainingData);
 
